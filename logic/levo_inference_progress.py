@@ -1,12 +1,11 @@
 import os
 import gc
 import sys
-
 import torch
-
 import json
 import numpy as np
 from omegaconf import OmegaConf
+from typing import Optional, Callable
 
 from codeclm.trainer.codec_song_pl import CodecLM_PL
 from codeclm.models import CodecLM
@@ -16,7 +15,9 @@ from separator import Separator
 from codeclm.utils.offload_profiler import OffloadProfiler, OffloadParamParse
 
 
-class LeVoInference(torch.nn.Module):
+class LeVoInferenceWithProgress(torch.nn.Module):
+    """Extended LeVoInference with progress tracking and cancellation support"""
+    
     def __init__(self, ckpt_path):
         super().__init__()
 
@@ -47,13 +48,15 @@ class LeVoInference(torch.nn.Module):
             duration = self.max_duration,
         )
 
-
-    def forward(self, lyric: str, description: str = None, prompt_audio_path: os.PathLike = None, genre: str = None, auto_prompt_path: os.PathLike = None, gen_type: str = "mixed", params = dict(), 
-                disable_offload=False, disable_cache_clear=False, disable_fp16=False, disable_sequential=False,
-                progress_callback=None, cancellation_token=None):
+    def forward(self, lyric: str, description: str = None, prompt_audio_path: os.PathLike = None, 
+                genre: str = None, auto_prompt_path: os.PathLike = None, gen_type: str = "mixed", 
+                params = dict(), disable_offload=False, disable_cache_clear=False, 
+                disable_fp16=False, disable_sequential=False,
+                progress_callback: Optional[Callable] = None,
+                cancellation_token: Optional[object] = None):
         
         # Check cancellation at start
-        if cancellation_token and hasattr(cancellation_token, 'is_cancelled') and cancellation_token.is_cancelled():
+        if cancellation_token and cancellation_token.is_cancelled():
             return None
             
         # Update progress
@@ -101,7 +104,7 @@ class LeVoInference(torch.nn.Module):
             melody_is_wav = True
 
         # Check cancellation before loading main model
-        if cancellation_token and hasattr(cancellation_token, 'is_cancelled') and cancellation_token.is_cancelled():
+        if cancellation_token and cancellation_token.is_cancelled():
             return None
             
         # Update progress
@@ -122,7 +125,6 @@ class LeVoInference(torch.nn.Module):
             offload_profiler.offload_layer(**(audiolm_offload_param.offload_layer_param_dict()))
             offload_profiler.clean_cache_wrapper(**(audiolm_offload_param.clean_cache_param_dict()))
         else:
-            # Always use float16 for the model to maintain compatibility
             audiolm = audiolm.cuda().to(torch.float16)
 
         model = CodecLM(name = "tmp",
@@ -131,12 +133,12 @@ class LeVoInference(torch.nn.Module):
             max_duration = self.max_duration,
             seperate_tokenizer = None,
         )
-        # Extract parameters that are not for set_generation_params
+        
+        # Extract parameters
         num_steps = params.pop('num_steps', 50)
         guidance_scale = params.pop('guidance_scale', 1.5)
         chunked = params.pop('chunked', True)
         chunk_size = params.pop('chunk_size', 128)
-        # Merge with defaults and set generation params
         params = {**self.default_params, **params}
         model.set_generation_params(**params)
 
@@ -150,7 +152,7 @@ class LeVoInference(torch.nn.Module):
         }
 
         # Check cancellation before generation
-        if cancellation_token and hasattr(cancellation_token, 'is_cancelled') and cancellation_token.is_cancelled():
+        if cancellation_token and cancellation_token.is_cancelled():
             return None
             
         # Update progress
@@ -183,7 +185,7 @@ class LeVoInference(torch.nn.Module):
                 torch.cuda.empty_cache()
 
         # Check cancellation before diffusion
-        if cancellation_token and hasattr(cancellation_token, 'is_cancelled') and cancellation_token.is_cancelled():
+        if cancellation_token and cancellation_token.is_cancelled():
             return None
             
         # Update progress
@@ -219,9 +221,14 @@ class LeVoInference(torch.nn.Module):
 
         with torch.no_grad():
             if melody_is_wav:
-                wav_seperate = model.generate_audio(tokens, pmt_wav, vocal_wav, bgm_wav, gen_type=gen_type, chunked=chunked, chunk_size=chunk_size, num_steps=num_steps, guidance_scale=guidance_scale)
+                wav_seperate = model.generate_audio(tokens, pmt_wav, vocal_wav, bgm_wav, 
+                                                  gen_type=gen_type, chunked=chunked, 
+                                                  chunk_size=chunk_size, num_steps=num_steps, 
+                                                  guidance_scale=guidance_scale)
             else:
-                wav_seperate = model.generate_audio(tokens, gen_type=gen_type, chunked=chunked, chunk_size=chunk_size, num_steps=num_steps, guidance_scale=guidance_scale)
+                wav_seperate = model.generate_audio(tokens, gen_type=gen_type, 
+                                                  chunked=chunked, chunk_size=chunk_size, 
+                                                  num_steps=num_steps, guidance_scale=guidance_scale)
 
         if offload_wav_tokenizer_diffusion:
             sep_offload_profiler.reset_empty_cache_mem_line()
