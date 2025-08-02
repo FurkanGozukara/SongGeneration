@@ -676,17 +676,18 @@ with gr.Blocks(title="SECourses LeVo Song Generation App V1",theme=gr.themes.Sof
                             )
                             save_preset_btn = gr.Button("Save Preset", variant="secondary", scale=1)
                         
-                        loop_presets = gr.Checkbox(
-                            label="Loop all presets",
-                            value=False,
-                            info="Generate songs using each saved preset"
-                        )
-                        
-                        randomize_params = gr.Checkbox(
-                            label="Randomize genre, instrument, emotion, timbre & gender",
-                            value=False,
-                            info="Randomly select values from dropdowns for each generation"
-                        )
+                        with gr.Row():
+                            loop_presets = gr.Checkbox(
+                                label="Loop all presets",
+                                value=False,
+                                info="Generate songs using each saved preset"
+                            )
+                            
+                            randomize_params = gr.Checkbox(
+                                label="Randomize genre, instrument, emotion, timbre & gender",
+                                value=False,
+                                info="Randomly select values from dropdowns for each generation"
+                            )
                     
                     struct = gr.JSON(
                 label="Song Structure (Optional - for display only)",
@@ -846,6 +847,39 @@ with gr.Blocks(title="SECourses LeVo Song Generation App V1",theme=gr.themes.Sof
                             info="Audio diffusion guidance. Higher = stronger prompt adherence"
                         )
                 
+                with gr.Column():
+                    gr.Markdown("""
+                    **Generation Length:** 
+                    - 2000 steps ≈ 80 seconds  
+                    - 2500 steps ≈ 100 seconds
+                    - 3000 steps ≈ 120 seconds
+                    - 3750+ steps → ~4000 steps (150s hard limit)
+                    
+                    ⚠️ **Model Limitation**: Regardless of slider value, generation is 
+                    hard-capped at ~4000 steps (150 seconds). Extended generation 
+                    beyond this limit is not currently implemented.
+                    
+                    **Diffusion Steps:** Controls audio quality vs speed trade-off
+                    - 20 steps: Fastest, lower quality
+                    - 50 steps: Balanced (default)
+                    - 100+ steps: Best quality, much slower
+                    """)
+                
+                with gr.Column():
+                    gr.Markdown("### VRAM Optimization")
+                    gr.Markdown("Disable these optimizations for faster generation on high-VRAM GPUs (24 GB GPUs can disable all)")
+                    with gr.Row():
+                        disable_offload = gr.Checkbox(label="Disable Model Offloading", value=False, 
+                                                    info="Keep models in VRAM instead of offloading to CPU")
+                        disable_cache_clear = gr.Checkbox(label="Disable Cache Clearing", value=False,
+                                                        info="Don't clear CUDA cache between steps")
+                    with gr.Row():
+                        disable_fp16 = gr.Checkbox(label="Disable Float16 Autocast", value=False,
+                                                 info="Disable automatic mixed precision (may cause errors)")
+                        disable_sequential = gr.Checkbox(label="Disable Sequential Loading", value=False,
+                                                       info="Keep all models in memory simultaneously")
+                    
+                    gr.Markdown("### Advanced Generation Options")
                     # Advanced options
                     with gr.Row():
                         use_sampling = gr.Checkbox(
@@ -899,38 +933,6 @@ with gr.Blocks(title="SECourses LeVo Song Generation App V1",theme=gr.themes.Sof
                             step=10,
                             info="Number of tokens to record"
                         )
-                
-                with gr.Column():
-                    gr.Markdown("""
-                    **Generation Length:** 
-                    - 2000 steps ≈ 80 seconds  
-                    - 2500 steps ≈ 100 seconds
-                    - 3000 steps ≈ 120 seconds
-                    - 3750+ steps → ~4000 steps (150s hard limit)
-                    
-                    ⚠️ **Model Limitation**: Regardless of slider value, generation is 
-                    hard-capped at ~4000 steps (150 seconds). Extended generation 
-                    beyond this limit is not currently implemented.
-                    
-                    **Diffusion Steps:** Controls audio quality vs speed trade-off
-                    - 20 steps: Fastest, lower quality
-                    - 50 steps: Balanced (default)
-                    - 100+ steps: Best quality, much slower
-                    """)
-                
-                with gr.Column():
-                    gr.Markdown("### VRAM Optimization")
-                    gr.Markdown("Disable these optimizations for faster generation on high-VRAM GPUs (24 GB GPUs can disable all)")
-                    with gr.Row():
-                        disable_offload = gr.Checkbox(label="Disable Model Offloading", value=False, 
-                                                    info="Keep models in VRAM instead of offloading to CPU")
-                        disable_cache_clear = gr.Checkbox(label="Disable Cache Clearing", value=False,
-                                                        info="Don't clear CUDA cache between steps")
-                    with gr.Row():
-                        disable_fp16 = gr.Checkbox(label="Disable Float16 Autocast", value=False,
-                                                 info="Disable automatic mixed precision (may cause errors)")
-                        disable_sequential = gr.Checkbox(label="Disable Sequential Loading", value=False,
-                                                       info="Keep all models in memory simultaneously")
             
         with gr.TabItem("📁 Batch Processing"):
             with gr.Row():
