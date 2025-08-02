@@ -766,6 +766,83 @@ with gr.Blocks(title="SECourses LeVo Song Generation App V1",theme=gr.themes.Sof
                     - Video encoded with H.264, CRF 17
                     """)
                     
+                    # Detailed tag system information
+                    with gr.Accordion("📖 Song Structure Tags Guide", open=False):
+                        gr.Markdown("""
+                        ## 🎵 Available Song Structure Tags
+                        
+                        Use these tags in your lyrics to control the song structure. Tags should be placed on their own lines.
+                        
+                        ### 🎤 Main Sections:
+                        - **[intro]** - Opening instrumental or vocal section
+                        - **[verse]** - Main story/narrative sections
+                        - **[chorus]** - Catchy, repeating hook section  
+                        - **[bridge]** - Contrasting section, usually appears once
+                        - **[outro]** - Closing section
+                        
+                        ### 🎸 Variations & Special Sections:
+                        - **[pre-chorus]** - Build-up section before chorus
+                        - **[post-chorus]** - Additional hook after chorus
+                        - **[break]** - Instrumental or rhythm break
+                        - **[instrumental]** - Pure instrumental section
+                        - **[interlude]** - Short connecting section
+                        - **[hook]** - Catchy melodic phrase
+                        - **[drop]** - EDM-style beat drop section
+                        - **[buildup]** - Rising energy section
+                        - **[breakdown]** - Stripped-down section
+                        - **[refrain]** - Repeated lyrical phrase
+                        - **[rap]** - Rap/spoken word section
+                        - **[vocal-run]** - Vocal ad-libs/melisma
+                        
+                        ### ⏱️ Length Modifiers:
+                        Add these after any tag to control section length:
+                        - **[intro-short]** - ~5 seconds
+                        - **[intro-medium]** or **[intro]** - ~10 seconds (default)
+                        - **[intro-long]** - ~15 seconds
+                        
+                        ### 🎼 Example Song Structure:
+                        ```
+                        [intro-medium]
+                        
+                        [verse]
+                        Walking down the street today
+                        Sunshine lighting up my way
+                        
+                        [pre-chorus]
+                        And I can feel it building up inside
+                        
+                        [chorus]
+                        This is our moment, we're alive
+                        Dancing through the day and night
+                        
+                        [verse]
+                        Every step feels so right
+                        Colors bursting into sight
+                        
+                        [chorus]
+                        This is our moment, we're alive
+                        Dancing through the day and night
+                        
+                        [bridge]
+                        When the world gets heavy
+                        We'll keep moving steady
+                        
+                        [chorus]
+                        This is our moment, we're alive
+                        Dancing through the day and night
+                        
+                        [outro-long]
+                        ```
+                        
+                        ### 💡 Pro Tips:
+                        - Place empty lines between sections for clarity
+                        - Tags are case-insensitive ([VERSE] = [verse])
+                        - Use consistent structure for professional results
+                        - Experiment with tag combinations for unique arrangements
+                        - Instrumental tags work great for genre-specific breaks
+                        - Length modifiers work with most section types
+                        """)
+                    
                     gr.Markdown(f"**Model checkpoint:** {ckpt_path}")
                     
                     gr.Markdown("""
