@@ -767,82 +767,6 @@ with gr.Blocks(title="SECourses LeVo Song Generation App V1",theme=gr.themes.Sof
                     - Video encoded with H.264, CRF 17
                     """)
                     
-                    # Detailed tag system information
-                    with gr.Accordion("📖 Song Structure Tags Guide", open=False):
-                        gr.Markdown("""
-                        ## 🎵 Available Song Structure Tags
-                        
-                        Use these tags in your lyrics to control the song structure. Tags should be placed on their own lines.
-                        
-                        ### 🎤 Main Sections:
-                        - **[intro]** - Opening instrumental or vocal section (~10 seconds)
-                        - **[verse]** - Main story/narrative sections (~20-30 seconds)
-                        - **[chorus]** - Catchy, repeating hook section (~15-20 seconds)
-                        - **[bridge]** - Contrasting section, usually appears once (~15-20 seconds)
-                        - **[outro]** - Closing section (~10 seconds)
-                        
-                        ### 🎸 Variations & Special Sections:
-                        - **[pre-chorus]** - Build-up section before chorus (~8-12 seconds)
-                        - **[post-chorus]** - Additional hook after chorus (~8-12 seconds)
-                        - **[break]** - Instrumental or rhythm break (~8-16 seconds)
-                        - **[instrumental]** - Pure instrumental section (~10-20 seconds)
-                        - **[interlude]** - Short connecting section (~5-10 seconds)
-                        - **[hook]** - Catchy melodic phrase (~4-8 seconds)
-                        - **[drop]** - EDM-style beat drop section (~8-16 seconds)
-                        - **[buildup]** - Rising energy section (~8-16 seconds)
-                        - **[breakdown]** - Stripped-down section (~8-16 seconds)
-                        - **[refrain]** - Repeated lyrical phrase (~4-8 seconds)
-                        - **[rap]** - Rap/spoken word section (~16-24 seconds)
-                        - **[vocal-run]** - Vocal ad-libs/melisma (~4-8 seconds)
-                        
-                        ### ⏱️ Length Modifiers:
-                        Add these after any tag to control section length:
-                        - **[intro-short]** - ~5 seconds
-                        - **[intro-medium]** or **[intro]** - ~10 seconds (default)
-                        - **[intro-long]** - ~15 seconds
-                        
-                        ### 🎼 Example Song Structure:
-                        ```
-                        [intro-medium]
-                        
-                        [verse]
-                        Walking down the street today
-                        Sunshine lighting up my way
-                        
-                        [pre-chorus]
-                        And I can feel it building up inside
-                        
-                        [chorus]
-                        This is our moment, we're alive
-                        Dancing through the day and night
-                        
-                        [verse]
-                        Every step feels so right
-                        Colors bursting into sight
-                        
-                        [chorus]
-                        This is our moment, we're alive
-                        Dancing through the day and night
-                        
-                        [bridge]
-                        When the world gets heavy
-                        We'll keep moving steady
-                        
-                        [chorus]
-                        This is our moment, we're alive
-                        Dancing through the day and night
-                        
-                        [outro-long]
-                        ```
-                        
-                        ### 💡 Pro Tips:
-                        - Place empty lines between sections for clarity
-                        - Tags are case-insensitive ([VERSE] = [verse])
-                        - Use consistent structure for professional results
-                        - Experiment with tag combinations for unique arrangements
-                        - Instrumental tags work great for genre-specific breaks
-                        - Length modifiers work with most section types
-                        """)
                     
                     gr.Markdown(f"**Model checkpoint:** {ckpt_path}")
                     
@@ -1040,6 +964,86 @@ with gr.Blocks(title="SECourses LeVo Song Generation App V1",theme=gr.themes.Sof
                     
                     # Batch status display
                     batch_status = gr.Markdown("", visible=False)
+        
+        with gr.TabItem("📖 Song Structure Tags"):
+            gr.Markdown("## 🎵 Available Song Structure Tags")
+            gr.Markdown("Use these tags in your lyrics to control the song structure. Tags should be placed on their own lines.")
+            
+            with gr.Row():
+                with gr.Column():
+                    gr.Markdown("""
+                    ### 🎤 Main Sections:
+                    - **[intro]** - Opening instrumental or vocal section (~10 seconds)
+                    - **[verse]** - Main story/narrative sections (~20-30 seconds)
+                    - **[chorus]** - Catchy, repeating hook section (~15-20 seconds)
+                    - **[bridge]** - Contrasting section, usually appears once (~15-20 seconds)
+                    - **[outro]** - Closing section (~10 seconds)
+                    
+                    ### 🎸 Variations & Special Sections:
+                    - **[pre-chorus]** - Build-up section before chorus (~8-12 seconds)
+                    - **[post-chorus]** - Additional hook after chorus (~8-12 seconds)
+                    - **[break]** - Instrumental or rhythm break (~8-16 seconds)
+                    - **[instrumental]** - Pure instrumental section (~10-20 seconds)
+                    - **[interlude]** - Short connecting section (~5-10 seconds)
+                    - **[hook]** - Catchy melodic phrase (~4-8 seconds)
+                    - **[drop]** - EDM-style beat drop section (~8-16 seconds)
+                    - **[buildup]** - Rising energy section (~8-16 seconds)
+                    - **[breakdown]** - Stripped-down section (~8-16 seconds)
+                    - **[refrain]** - Repeated lyrical phrase (~4-8 seconds)
+                    - **[rap]** - Rap/spoken word section (~16-24 seconds)
+                    - **[vocal-run]** - Vocal ad-libs/melisma (~4-8 seconds)
+                    
+                    ### ⏱️ Length Modifiers:
+                    Add these after any tag to control section length:
+                    - **[intro-short]** - ~5 seconds
+                    - **[intro-medium]** or **[intro]** - ~10 seconds (default)
+                    - **[intro-long]** - ~15 seconds
+                    """)
+                
+                with gr.Column():
+                    gr.Markdown("""
+                    ### 🎼 Example Song Structure:
+                    ```
+                    [intro-medium]
+                    
+                    [verse]
+                    Walking down the street today
+                    Sunshine lighting up my way
+                    
+                    [pre-chorus]
+                    And I can feel it building up inside
+                    
+                    [chorus]
+                    This is our moment, we're alive
+                    Dancing through the day and night
+                    
+                    [verse]
+                    Every step feels so right
+                    Colors bursting into sight
+                    
+                    [chorus]
+                    This is our moment, we're alive
+                    Dancing through the day and night
+                    
+                    [bridge]
+                    When the world gets heavy
+                    We'll keep moving steady
+                    
+                    [chorus]
+                    This is our moment, we're alive
+                    Dancing through the day and night
+                    
+                    [outro-long]
+                    ```
+                    
+                    ### 💡 Pro Tips:
+                    - Place empty lines between sections for clarity
+                    - Tags are case-insensitive ([VERSE] = [verse])
+                    - Use consistent structure for professional results
+                    - Experiment with tag combinations for unique arrangements
+                    - Instrumental tags work great for genre-specific breaks
+                    - Length modifiers work with most section types
+                    """)
     
     # Add character counter and duration estimator for lyrics
     def update_char_count_and_duration(text):
