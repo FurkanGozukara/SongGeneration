@@ -606,7 +606,7 @@ def submit_lyrics(
     return wav_path, video_path, history, process_history(history)
 
 # Create Gradio interface
-with gr.Blocks(title="LeVo Song Generation") as demo:
+with gr.Blocks(title="SECourses LeVo Song Generation App V1",theme=gr.themes.Soft()) as demo:
     gr.Markdown("# LeVo Song Generation")
     
     history = gr.State([])
