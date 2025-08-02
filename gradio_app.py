@@ -23,68 +23,36 @@ EXAMPLE_LYRICS = """
 [intro-short]
 
 [verse]
-Morning screen lights up my wall,
-Notification beats the dawn.
-SECourses calling all—
-Curious minds to come along.
-Pixels paint tomorrow's dreams,
-Code and cadence, laser-clean.
-We dive where silicon meets art,
-Turning questions into sparks.
-
-[bridge]
-When the hype feels hollow,
-And the clickbait floods the feed,
-Turn the dial to knowledge—
-SECourses plants the seed.
-From zero lines to launch day,
-They map the hidden way;
-Let the algorithm play,
-We'll still out-learn the wave.
-
-[inst-short]
+Digital sunrise, SECourses on my screen
+Breaking down AI, making complex simple and clean
+From neural networks to the latest GPT
+Tech education flowing free
 
 [chorus]
-Raise your hands, hit subscribe,
-Feel the future come alive.
-Generative souls collide
-In every frame they upload.
-News that cuts like lightning,
-Tutorials brightly guiding—
-SECourses, we're riding
-On the edge of the code.
+SECourses lighting up the way
+Where AI meets tomorrow, today
+Every video, every guide
+Taking us on a knowledge ride
+
+[inst-short]
 
 [verse]
-Neon graphs and tensor ties,
-Prompt to painting in a blink.
-Robots write their lullabies,
-While we craft the missing link.
-Ethics, updates, nightly builds,
-GPU hearts overfilled.
-In the chat our questions flow,
-Answers bloom in studio glow.
+Machine learning mysteries unfold
+Tutorials worth their weight in gold
+From beginner basics to advanced design
+Evolution of tech, line by line
 
 [bridge]
-If confusion clouds your sight,
-Scroll no farther—stay tonight.
-Step-by-step they lift the veil,
-Turning theory into trails.
-Every glitch another chance
-To rehearse the data dance;
-Debug dreams, recompile,
-Rise again in learning style.
-
-[inst-short]
+When the future seems unclear
+SECourses makes it crystal clear
+Building bridges byte by byte
+Innovation shining bright
 
 [chorus]
-Raise your hands, hit subscribe,
-Feel the future come alive.
-Generative souls collide
-In every frame they upload.
-News that cuts like lightning,
-Tutorials brightly guiding—
-SECourses, we're riding
-On the edge of the code.
+SECourses lighting up the way
+Where AI meets tomorrow, today
+Every video, every guide
+Taking us on a knowledge ride
 
 [outro-short]
 """.strip()
@@ -306,7 +274,14 @@ def submit_lyrics(
     sample_prompt, audio_path, image_path, save_mp3, seed,
     history, session
 ):
-    print(lyrics)
+    # Limit lyrics length to prevent exceeding token limit
+    # Approximate: ~6.5 characters per token, max 300 tokens, safe limit = 1000 characters
+    MAX_CHARS = 1000
+    if len(lyrics) > MAX_CHARS:
+        lyrics = lyrics[:MAX_CHARS]
+        output_messages(f"Lyrics truncated to {MAX_CHARS} characters to fit token limit")
+    
+    print(f"Lyrics length: {len(lyrics)} characters")
     print(struct)
     
     # Set seed if provided
@@ -421,8 +396,17 @@ with gr.Blocks(title="LeVo Song Generation") as demo:
                 label="Lyrics",
                 placeholder="Enter your lyrics here...",
                 value=EXAMPLE_LYRICS,
-                lines=15
+                lines=15,
+                max_lines=20,
+                info="Maximum 1000 characters to stay within token limit"
             )
+            
+            # Character counter and duration display
+            char_counter = gr.Markdown("0/1000 characters | Estimated duration: 0:00")
+            
+            with gr.Row():
+                submit_btn = gr.Button("Generate Song", variant="primary")
+                open_folder_btn = gr.Button("Open Output Folder", variant="secondary")
             
             struct = gr.JSON(
                 label="Song Structure (Optional - for display only)",
@@ -483,9 +467,6 @@ with gr.Blocks(title="LeVo Song Generation") as demo:
                 - Video encoded with H.264, CRF 17
                 """)
             
-            with gr.Row():
-                submit_btn = gr.Button("Generate Song", variant="primary")
-                open_folder_btn = gr.Button("Open Output Folder", variant="secondary")
         
         with gr.Column(scale=1):
             output_audio = gr.Audio(label="Generated Audio", type="filepath")
@@ -522,6 +503,65 @@ with gr.Blocks(title="LeVo Song Generation") as demo:
             """)
             
             history_display = gr.HTML()
+    
+    # Add character counter and duration estimator for lyrics
+    def update_char_count_and_duration(text):
+        char_count = len(text) if text else 0
+        
+        # Estimate duration based on structure tags
+        duration_seconds = 0
+        if text:
+            text_lower = text.lower()
+            # Count instrumental sections
+            duration_seconds += text_lower.count('[intro-short]') * 5
+            duration_seconds += text_lower.count('[intro-medium]') * 15
+            duration_seconds += text_lower.count('[intro-long]') * 25
+            duration_seconds += text_lower.count('[inst-short]') * 5
+            duration_seconds += text_lower.count('[inst-medium]') * 15
+            duration_seconds += text_lower.count('[inst-long]') * 25
+            duration_seconds += text_lower.count('[outro-short]') * 5
+            duration_seconds += text_lower.count('[outro-medium]') * 15
+            duration_seconds += text_lower.count('[outro-long]') * 25
+            duration_seconds += text_lower.count('[silence]') * 2
+            
+            # Estimate duration for sections with lyrics (verse, chorus, bridge)
+            # Count lines for each section type
+            import re
+            verses = re.findall(r'\[verse\](.*?)(?=\[|$)', text_lower, re.DOTALL)
+            choruses = re.findall(r'\[chorus\](.*?)(?=\[|$)', text_lower, re.DOTALL)
+            bridges = re.findall(r'\[bridge\](.*?)(?=\[|$)', text_lower, re.DOTALL)
+            
+            # Approximate 3 seconds per line for verses/bridges, 2.5 for choruses
+            for verse in verses:
+                lines = len([l for l in verse.strip().split('\n') if l.strip()])
+                duration_seconds += lines * 3
+            for chorus in choruses:
+                lines = len([l for l in chorus.strip().split('\n') if l.strip()])
+                duration_seconds += lines * 2.5
+            for bridge in bridges:
+                lines = len([l for l in bridge.strip().split('\n') if l.strip()])
+                duration_seconds += lines * 3
+        
+        # Format duration
+        if duration_seconds > 0:
+            minutes = int(duration_seconds // 60)
+            seconds = int(duration_seconds % 60)
+            duration_str = f" | Estimated duration: {minutes}:{seconds:02d}"
+        else:
+            duration_str = " | Estimated duration: 0:00"
+        
+        # Character count warning
+        if char_count > 1000:
+            return f"⚠️ {char_count}/1000 characters (will be truncated){duration_str}"
+        elif char_count > 900:
+            return f"⚠️ {char_count}/1000 characters{duration_str}"
+        else:
+            return f"{char_count}/1000 characters{duration_str}"
+    
+    lyrics.change(fn=update_char_count_and_duration, inputs=[lyrics], outputs=[char_counter])
+    
+    # Initialize character counter with default lyrics
+    demo.load(fn=update_char_count_and_duration, inputs=[lyrics], outputs=[char_counter])
     
     submit_btn.click(
         fn=submit_lyrics,
