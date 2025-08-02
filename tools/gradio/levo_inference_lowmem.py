@@ -113,6 +113,8 @@ class LeVoInference(torch.nn.Module):
             max_duration = self.max_duration,
             seperate_tokenizer = None,
         )
+        # Extract num_steps before passing to set_generation_params
+        num_steps = params.pop('num_steps', 50)
         params = {**self.default_params, **params}
         model.set_generation_params(**params)
 
@@ -179,9 +181,9 @@ class LeVoInference(torch.nn.Module):
 
         with torch.no_grad():
             if melody_is_wav:
-                wav_seperate = model.generate_audio(tokens, pmt_wav, vocal_wav, bgm_wav, gen_type=gen_type, chunked=True)
+                wav_seperate = model.generate_audio(tokens, pmt_wav, vocal_wav, bgm_wav, gen_type=gen_type, chunked=True, num_steps=num_steps)
             else:
-                wav_seperate = model.generate_audio(tokens, gen_type=gen_type, chunked=True)
+                wav_seperate = model.generate_audio(tokens, gen_type=gen_type, chunked=True, num_steps=num_steps)
 
         if offload_wav_tokenizer_diffusion:
             sep_offload_profiler.reset_empty_cache_mem_line()

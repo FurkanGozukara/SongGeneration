@@ -271,7 +271,7 @@ class CodecLM:
         return gen_tokens
 
     @torch.no_grad()
-    def generate_audio(self, gen_tokens: torch.Tensor, prompt=None, vocal_prompt=None, bgm_prompt=None, chunked=False, chunk_size=128, gen_type='mixed'):
+    def generate_audio(self, gen_tokens: torch.Tensor, prompt=None, vocal_prompt=None, bgm_prompt=None, chunked=False, chunk_size=128, gen_type='mixed', num_steps=50):
         """Generate Audio from tokens"""
         assert gen_tokens.dim() == 3
         if self.seperate_tokenizer is not None:
@@ -288,7 +288,7 @@ class CodecLM:
                     bgm_prompt = torch.zeros_like(bgm_prompt)
             else:
                 assert gen_type == 'mixed', f"gen_type {gen_type} not supported"
-            gen_audio_seperate = self.seperate_tokenizer.decode([gen_tokens_vocal, gen_tokens_bgm], vocal_prompt, bgm_prompt, chunked=chunked, chunk_size=chunk_size)
+            gen_audio_seperate = self.seperate_tokenizer.decode([gen_tokens_vocal, gen_tokens_bgm], vocal_prompt, bgm_prompt, chunked=chunked, chunk_size=chunk_size, num_steps=num_steps)
             return gen_audio_seperate
         else:
             gen_audio = self.audiotokenizer.decode(gen_tokens, prompt)

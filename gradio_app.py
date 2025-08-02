@@ -269,6 +269,7 @@ def set_seed(seed):
 def submit_lyrics(
     lyrics, struct, genre, instrument, emotion, timbre, gender,
     sample_prompt, audio_path, image_path, save_mp3, seed,
+    max_gen_length, diffusion_steps,
     disable_offload, disable_cache_clear, disable_fp16, disable_sequential,
     history, session
 ):
@@ -331,6 +332,24 @@ def submit_lyrics(
     
     # Call the model using the forward method (or __call__)
     # The model expects: lyric, description, prompt_audio_path, genre, auto_prompt_path, gen_type, params
+    # Pass generation parameters - only include valid set_generation_params
+    # Account for pattern delays (~250 steps) when converting to duration
+    # The pattern adds delays, so we need to subtract them from the requested length
+    pattern_delay_offset = 250  # Approximate delay from codebook pattern
+    actual_steps = max(max_gen_length - pattern_delay_offset, 1000)
+    # Convert to duration (assuming frame_rate of 25)
+    duration_from_steps = actual_steps / 25.0
+    # Ensure duration doesn't exceed model's max_duration (150 seconds)
+    duration_from_steps = min(duration_from_steps, 150.0)
+    
+    # Log the actual values for debugging
+    output_messages(f"Requested steps: {max_gen_length}, Actual generation: ~{int(duration_from_steps * 25) + pattern_delay_offset} steps")
+    
+    gen_params = {
+        'duration': duration_from_steps,  # Convert steps to seconds
+        'num_steps': diffusion_steps     # This will be extracted in the inference code
+    }
+    
     audio_data = MODEL(
         song_data["lyrics"], 
         f"{song_data['gender']}, {song_data['timbre']}, {song_data['genre']}, {song_data['emotion']}, {song_data['instrument']}",
@@ -338,7 +357,7 @@ def submit_lyrics(
         None,  # genre parameter (None since we're using description)
         op.join(APP_DIR, "ckpt/prompt.pt"),  # auto_prompt_path
         "mixed",  # gen_type
-        {},  # params
+        gen_params,  # params
         disable_offload=disable_offload,
         disable_cache_clear=disable_cache_clear,
         disable_fp16=disable_fp16,
@@ -456,6 +475,43 @@ with gr.Blocks(title="LeVo Song Generation") as demo:
                 save_mp3_check = gr.Checkbox(label="Also save as MP3 (192 kbps)", value=True)
                 seed_input = gr.Number(label="Seed (for reproducibility)", value=-1, precision=0, 
                                      info="Use -1 for random, or any positive number for reproducible results")
+            
+            # Advanced generation settings
+            with gr.Accordion("Advanced Generation Settings", open=False):
+                gr.Markdown("⚠️ **Warning:** Increasing these values will increase generation time and VRAM usage")
+                with gr.Row():
+                    max_gen_length = gr.Slider(
+                        label="Max Generation Length (Target)", 
+                        minimum=2000, 
+                        maximum=7500, 
+                        value=3750, 
+                        step=100,
+                        info="Target generation steps. Currently hard-limited to ~4000 steps (150s) by model"
+                    )
+                    diffusion_steps = gr.Slider(
+                        label="Diffusion Steps", 
+                        minimum=20, 
+                        maximum=200, 
+                        value=50, 
+                        step=10,
+                        info="Number of denoising steps for audio generation. Higher = better quality but slower"
+                    )
+                gr.Markdown("""
+                **Generation Length:** 
+                - 2000 steps ≈ 80 seconds  
+                - 2500 steps ≈ 100 seconds
+                - 3000 steps ≈ 120 seconds
+                - 3750+ steps → ~4000 steps (150s hard limit)
+                
+                ⚠️ **Model Limitation**: Regardless of slider value, generation is 
+                hard-capped at ~4000 steps (150 seconds). Extended generation 
+                beyond this limit is not currently implemented.
+                
+                **Diffusion Steps:** Controls audio quality vs speed trade-off
+                - 20 steps: Fastest, lower quality
+                - 50 steps: Balanced (default)
+                - 100+ steps: Best quality, much slower
+                """)
             
             # VRAM optimization controls
             with gr.Accordion("VRAM Optimization Settings", open=False):
@@ -586,6 +642,7 @@ with gr.Blocks(title="LeVo Song Generation") as demo:
         inputs=[
             lyrics, struct, genre, instrument, emotion, timbre, gender,
             sample_prompt, audio_path, image_upload, save_mp3_check, seed_input,
+            max_gen_length, diffusion_steps,
             disable_offload, disable_cache_clear, disable_fp16, disable_sequential,
             history, session
         ],
