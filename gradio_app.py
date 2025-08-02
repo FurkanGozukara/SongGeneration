@@ -271,6 +271,7 @@ def submit_lyrics(
     sample_prompt, audio_path, image_path, save_mp3, seed,
     max_gen_length, diffusion_steps, temperature, top_k, top_p,
     cfg_coef, guidance_scale, use_sampling, extend_stride,
+    gen_type, chunked, chunk_size, record_tokens, record_window,
     disable_offload, disable_cache_clear, disable_fp16, disable_sequential,
     history, session
 ):
@@ -356,6 +357,10 @@ def submit_lyrics(
         'guidance_scale': guidance_scale,  # This will be extracted for audio diffusion
         'use_sampling': use_sampling,
         'extend_stride': extend_stride,
+        'chunked': chunked,               # This will be extracted for audio generation
+        'chunk_size': chunk_size,         # This will be extracted for audio generation
+        'record_tokens': record_tokens,
+        'record_window': record_window,
     }
     
     audio_data = MODEL(
@@ -364,7 +369,7 @@ def submit_lyrics(
         song_data["audio_path"] if song_data["sample_prompt"] else None,
         None,  # genre parameter (None since we're using description)
         op.join(APP_DIR, "ckpt/prompt.pt"),  # auto_prompt_path
-        "mixed",  # gen_type
+        gen_type,  # gen_type from UI
         gen_params,  # params
         disable_offload=disable_offload,
         disable_cache_clear=disable_cache_clear,
@@ -568,6 +573,44 @@ with gr.Blocks(title="LeVo Song Generation") as demo:
                         step=1,
                         info="Stride for extended generation (not currently used)"
                     )
+                
+                # Generation type and processing options
+                with gr.Row():
+                    gen_type = gr.Radio(
+                        label="Generation Type",
+                        choices=["mixed", "vocal", "bgm"],
+                        value="mixed",
+                        info="Generate vocals+BGM (mixed), vocals only, or BGM only"
+                    )
+                    chunked = gr.Checkbox(
+                        label="Chunked Processing",
+                        value=True,
+                        info="Process audio in chunks to save memory"
+                    )
+                    chunk_size = gr.Slider(
+                        label="Chunk Size",
+                        minimum=64,
+                        maximum=256,
+                        value=128,
+                        step=32,
+                        info="Size of audio chunks for processing"
+                    )
+                
+                # Token recording options
+                with gr.Row():
+                    record_tokens = gr.Checkbox(
+                        label="Record Tokens",
+                        value=True,
+                        info="Record generation tokens for analysis"
+                    )
+                    record_window = gr.Slider(
+                        label="Record Window",
+                        minimum=10,
+                        maximum=200,
+                        value=50,
+                        step=10,
+                        info="Number of tokens to record"
+                    )
                 gr.Markdown("""
                 **Generation Length:** 
                 - 2000 steps ≈ 80 seconds  
@@ -716,6 +759,7 @@ with gr.Blocks(title="LeVo Song Generation") as demo:
             sample_prompt, audio_path, image_upload, save_mp3_check, seed_input,
             max_gen_length, diffusion_steps, temperature, top_k, top_p,
             cfg_coef, guidance_scale, use_sampling, extend_stride,
+            gen_type, chunked, chunk_size, record_tokens, record_window,
             disable_offload, disable_cache_clear, disable_fp16, disable_sequential,
             history, session
         ],
