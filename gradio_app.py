@@ -651,6 +651,11 @@ with gr.Blocks(title="SECourses LeVo Song Generation App V1",theme=gr.themes.Sof
                     # Character counter and duration display
                     char_counter = gr.Markdown("0/1000 characters | Estimated duration: 0:00")
             
+                    # Generate and Open Folder buttons at the top
+                    with gr.Row():
+                        submit_btn = gr.Button("Generate Song", variant="primary")
+                        open_folder_btn = gr.Button("Open Output Folder", variant="secondary")
+            
                     # Preset controls
                     with gr.Accordion("Presets", open=True):
                         with gr.Row():
@@ -683,10 +688,6 @@ with gr.Blocks(title="SECourses LeVo Song Generation App V1",theme=gr.themes.Sof
                             info="Randomly select values from dropdowns for each generation"
                         )
                     
-                    with gr.Row():
-                        submit_btn = gr.Button("Generate Song", variant="primary")
-                        open_folder_btn = gr.Button("Open Output Folder", variant="secondary")
-            
                     struct = gr.JSON(
                 label="Song Structure (Optional - for display only)",
                 value=[
@@ -774,25 +775,25 @@ with gr.Blocks(title="SECourses LeVo Song Generation App V1",theme=gr.themes.Sof
                         Use these tags in your lyrics to control the song structure. Tags should be placed on their own lines.
                         
                         ### 🎤 Main Sections:
-                        - **[intro]** - Opening instrumental or vocal section
-                        - **[verse]** - Main story/narrative sections
-                        - **[chorus]** - Catchy, repeating hook section  
-                        - **[bridge]** - Contrasting section, usually appears once
-                        - **[outro]** - Closing section
+                        - **[intro]** - Opening instrumental or vocal section (~10 seconds)
+                        - **[verse]** - Main story/narrative sections (~20-30 seconds)
+                        - **[chorus]** - Catchy, repeating hook section (~15-20 seconds)
+                        - **[bridge]** - Contrasting section, usually appears once (~15-20 seconds)
+                        - **[outro]** - Closing section (~10 seconds)
                         
                         ### 🎸 Variations & Special Sections:
-                        - **[pre-chorus]** - Build-up section before chorus
-                        - **[post-chorus]** - Additional hook after chorus
-                        - **[break]** - Instrumental or rhythm break
-                        - **[instrumental]** - Pure instrumental section
-                        - **[interlude]** - Short connecting section
-                        - **[hook]** - Catchy melodic phrase
-                        - **[drop]** - EDM-style beat drop section
-                        - **[buildup]** - Rising energy section
-                        - **[breakdown]** - Stripped-down section
-                        - **[refrain]** - Repeated lyrical phrase
-                        - **[rap]** - Rap/spoken word section
-                        - **[vocal-run]** - Vocal ad-libs/melisma
+                        - **[pre-chorus]** - Build-up section before chorus (~8-12 seconds)
+                        - **[post-chorus]** - Additional hook after chorus (~8-12 seconds)
+                        - **[break]** - Instrumental or rhythm break (~8-16 seconds)
+                        - **[instrumental]** - Pure instrumental section (~10-20 seconds)
+                        - **[interlude]** - Short connecting section (~5-10 seconds)
+                        - **[hook]** - Catchy melodic phrase (~4-8 seconds)
+                        - **[drop]** - EDM-style beat drop section (~8-16 seconds)
+                        - **[buildup]** - Rising energy section (~8-16 seconds)
+                        - **[breakdown]** - Stripped-down section (~8-16 seconds)
+                        - **[refrain]** - Repeated lyrical phrase (~4-8 seconds)
+                        - **[rap]** - Rap/spoken word section (~16-24 seconds)
+                        - **[vocal-run]** - Vocal ad-libs/melisma (~4-8 seconds)
                         
                         ### ⏱️ Length Modifiers:
                         Add these after any tag to control section length:
