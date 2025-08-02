@@ -220,8 +220,8 @@ class Flow1dVAESeparate(AudioTokenizer):
         return codes_vocal, codes_bgm
     
     @torch.no_grad()    
-    def decode(self, codes: torch.Tensor, prompt_vocal = None, prompt_bgm = None, chunked=False, chunk_size=128, num_steps=50):
-        wav = self.model.code2sound(codes, prompt_vocal=prompt_vocal, prompt_bgm=prompt_bgm, guidance_scale=1.5, 
+    def decode(self, codes: torch.Tensor, prompt_vocal = None, prompt_bgm = None, chunked=False, chunk_size=128, num_steps=50, guidance_scale=1.5):
+        wav = self.model.code2sound(codes, prompt_vocal=prompt_vocal, prompt_bgm=prompt_bgm, guidance_scale=guidance_scale, 
                                     num_steps=num_steps, disable_progress=False, chunked=chunked, chunk_size=chunk_size) # [B,N,T] -> [B,T]
         return wav[None]
 

@@ -269,7 +269,8 @@ def set_seed(seed):
 def submit_lyrics(
     lyrics, struct, genre, instrument, emotion, timbre, gender,
     sample_prompt, audio_path, image_path, save_mp3, seed,
-    max_gen_length, diffusion_steps,
+    max_gen_length, diffusion_steps, temperature, top_k, top_p,
+    cfg_coef, guidance_scale, use_sampling, extend_stride,
     disable_offload, disable_cache_clear, disable_fp16, disable_sequential,
     history, session
 ):
@@ -347,7 +348,14 @@ def submit_lyrics(
     
     gen_params = {
         'duration': duration_from_steps,  # Convert steps to seconds
-        'num_steps': diffusion_steps     # This will be extracted in the inference code
+        'num_steps': diffusion_steps,     # This will be extracted in the inference code
+        'temperature': temperature,
+        'top_k': top_k,
+        'top_p': top_p,
+        'cfg_coef': cfg_coef,
+        'guidance_scale': guidance_scale,  # This will be extracted for audio diffusion
+        'use_sampling': use_sampling,
+        'extend_stride': extend_stride,
     }
     
     audio_data = MODEL(
@@ -478,7 +486,9 @@ with gr.Blocks(title="LeVo Song Generation") as demo:
             
             # Advanced generation settings
             with gr.Accordion("Advanced Generation Settings", open=False):
-                gr.Markdown("⚠️ **Warning:** Increasing these values will increase generation time and VRAM usage")
+                gr.Markdown("⚠️ **Warning:** Modifying these values affects generation quality and speed")
+                
+                # Primary controls
                 with gr.Row():
                     max_gen_length = gr.Slider(
                         label="Max Generation Length (Target)", 
@@ -495,6 +505,68 @@ with gr.Blocks(title="LeVo Song Generation") as demo:
                         value=50, 
                         step=10,
                         info="Number of denoising steps for audio generation. Higher = better quality but slower"
+                    )
+                
+                # Sampling parameters
+                with gr.Row():
+                    temperature = gr.Slider(
+                        label="Temperature",
+                        minimum=0.1,
+                        maximum=2.0,
+                        value=1.0,
+                        step=0.1,
+                        info="Controls randomness. Lower = more focused, Higher = more creative"
+                    )
+                    top_k = gr.Slider(
+                        label="Top-k",
+                        minimum=0,
+                        maximum=500,
+                        value=250,
+                        step=10,
+                        info="Limits sampling to top k tokens. 0 = disabled"
+                    )
+                    top_p = gr.Slider(
+                        label="Top-p (Nucleus Sampling)",
+                        minimum=0.0,
+                        maximum=1.0,
+                        value=0.0,
+                        step=0.05,
+                        info="Cumulative probability cutoff. 0 = use top-k instead"
+                    )
+                
+                # Guidance parameters
+                with gr.Row():
+                    cfg_coef = gr.Slider(
+                        label="CFG Coefficient",
+                        minimum=1.0,
+                        maximum=10.0,
+                        value=3.0,
+                        step=0.5,
+                        info="Classifier-free guidance strength. Higher = stronger conditioning"
+                    )
+                    guidance_scale = gr.Slider(
+                        label="Diffusion Guidance Scale",
+                        minimum=0.5,
+                        maximum=3.0,
+                        value=1.5,
+                        step=0.1,
+                        info="Audio diffusion guidance. Higher = stronger prompt adherence"
+                    )
+                
+                # Advanced options
+                with gr.Row():
+                    use_sampling = gr.Checkbox(
+                        label="Use Sampling",
+                        value=True,
+                        info="Enable probabilistic sampling (recommended)"
+                    )
+                    extend_stride = gr.Slider(
+                        label="Extend Stride",
+                        minimum=1,
+                        maximum=30,
+                        value=5,
+                        step=1,
+                        info="Stride for extended generation (not currently used)"
                     )
                 gr.Markdown("""
                 **Generation Length:** 
@@ -642,7 +714,8 @@ with gr.Blocks(title="LeVo Song Generation") as demo:
         inputs=[
             lyrics, struct, genre, instrument, emotion, timbre, gender,
             sample_prompt, audio_path, image_upload, save_mp3_check, seed_input,
-            max_gen_length, diffusion_steps,
+            max_gen_length, diffusion_steps, temperature, top_k, top_p,
+            cfg_coef, guidance_scale, use_sampling, extend_stride,
             disable_offload, disable_cache_clear, disable_fp16, disable_sequential,
             history, session
         ],
