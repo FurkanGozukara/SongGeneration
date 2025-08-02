@@ -95,7 +95,7 @@ def collect_current_parameters(
     cfg_coef, guidance_scale, use_sampling, extend_stride,
     gen_type, chunked, chunk_size, record_tokens, record_window,
     disable_offload, disable_cache_clear, disable_fp16, disable_sequential,
-    num_generations
+    num_generations, loop_presets, randomize_params
 ):
     """Collect all current parameters into a dictionary"""
     return {
@@ -128,7 +128,9 @@ def collect_current_parameters(
         'disable_cache_clear': disable_cache_clear,
         'disable_fp16': disable_fp16,
         'disable_sequential': disable_sequential,
-        'num_generations': num_generations
+        'num_generations': num_generations,
+        'loop_presets': loop_presets,
+        'randomize_params': randomize_params
     }
 
 
@@ -241,7 +243,7 @@ def run_batch_processing(
     cfg_coef, guidance_scale, use_sampling, extend_stride,
     gen_type, chunked, chunk_size, record_tokens, record_window,
     disable_offload, disable_cache_clear, disable_fp16, disable_sequential,
-    progress=gr.Progress()
+    randomize_params, progress=gr.Progress()
 ):
     """Run batch processing with progress tracking"""
     if not input_folder or not output_folder:
@@ -259,7 +261,7 @@ def run_batch_processing(
         cfg_coef, guidance_scale, use_sampling, extend_stride,
         gen_type, chunked, chunk_size, record_tokens, record_window,
         disable_offload, disable_cache_clear, disable_fp16, disable_sequential,
-        num_generations
+        num_generations, loop_presets, randomize_params
     )
     
     # Set progress callback
@@ -319,7 +321,7 @@ def submit_lyrics(
     cfg_coef, guidance_scale, use_sampling, extend_stride,
     gen_type, chunked, chunk_size, record_tokens, record_window,
     disable_offload, disable_cache_clear, disable_fp16, disable_sequential,
-    num_generations, history, session, progress=gr.Progress()
+    num_generations, loop_presets, randomize_params, history, session, progress=gr.Progress()
 ):
     # Reset cancellation token
     cancellation_token.reset()
@@ -413,9 +415,16 @@ def submit_lyrics(
     }
     
     try:
+        # Store initial values before potential randomization
+        current_genre = genre
+        current_instrument = instrument
+        current_emotion = emotion
+        current_timbre = timbre
+        current_gender = gender
+        
         audio_data = MODEL(
             song_data["lyrics"], 
-            f"{song_data['gender']}, {song_data['timbre']}, {song_data['genre']}, {song_data['emotion']}, {song_data['instrument']}",
+            f"{current_gender}, {current_timbre}, {current_genre}, {current_emotion}, {current_instrument}",
             song_data["audio_path"] if song_data["sample_prompt"] else None,
             None,  # genre parameter (None since we're using description)
             op.join(APP_DIR, "ckpt/prompt.pt"),  # auto_prompt_path
@@ -443,114 +452,166 @@ def submit_lyrics(
     # Show cancel button and progress
     yield None, None, history, process_history(history), gr.update(visible=True), gr.update(visible=True)
     
+    # Load all presets if loop_presets is enabled
+    presets_to_use = [None]  # None means use current settings
+    if loop_presets:
+        all_presets = preset_manager.get_preset_list()
+        if all_presets:
+            presets_to_use = all_presets
+            output_messages(f"Looping through {len(presets_to_use)} presets")
+        else:
+            output_messages("No presets found, using current settings only")
+    
     # Generate multiple songs if requested
     generated_files = []
+    total_generations = len(presets_to_use) * num_generations
+    generation_count = 0
     
-    for gen_idx in range(num_generations):
-        if cancellation_token.is_cancelled():
-            gr.Info("Generation cancelled")
-            break
-            
-        # Update progress for multiple generations
-        if num_generations > 1:
-            progress((gen_idx / num_generations), desc=f"Generating song {gen_idx + 1}/{num_generations}")
-        
-        # Generate new seed for each iteration after the first
-        if gen_idx > 0:
-            used_seed = random.randint(0, 2147483647)
-            set_seed(used_seed)
-            output_messages(f"Generation {gen_idx + 1}: Using seed: {used_seed}")
-        
-        # Re-run generation for subsequent iterations
-        if gen_idx > 0:
-            try:
-                audio_data = MODEL(
-                    song_data["lyrics"], 
-                    f"{song_data['gender']}, {song_data['timbre']}, {song_data['genre']}, {song_data['emotion']}, {song_data['instrument']}",
-                    song_data["audio_path"] if song_data["sample_prompt"] else None,
-                    None,
-                    op.join(APP_DIR, "ckpt/prompt.pt"),
-                    gen_type,
-                    gen_params,
-                    disable_offload=disable_offload,
-                    disable_cache_clear=disable_cache_clear,
-                    disable_fp16=disable_fp16,
-                    disable_sequential=disable_sequential,
-                    progress_callback=progress_callback,
-                    cancellation_token=cancellation_token
-                )
-                
-                if audio_data is None:
-                    continue
-                    
-                audio_data = audio_data.cpu().permute(1, 0).float().numpy()
-                
-            except Exception as e:
-                gr.Error(f"Generation {gen_idx + 1} failed: {str(e)}")
+    # Preset loop (outer loop)
+    for preset_idx, preset_name in enumerate(presets_to_use):
+        # Load preset if specified
+        if preset_name:
+            preset_data, message = preset_manager.load_preset(preset_name)
+            if preset_data:
+                output_messages(f"Using preset: {preset_name}")
+                # Override current parameters with preset values (except lyrics)
+                current_lyrics = lyrics  # Always keep user's lyrics
+                genre = preset_data.get('genre', genre)
+                instrument = preset_data.get('instrument', instrument)
+                emotion = preset_data.get('emotion', emotion)
+                timbre = preset_data.get('timbre', timbre)
+                gender = preset_data.get('gender', gender)
+                # Also get preset's randomize setting
+                randomize_params = preset_data.get('randomize_params', randomize_params)
+            else:
+                output_messages(f"Failed to load preset {preset_name}, skipping")
                 continue
         
-        # Save the audio with sequential numbering
-        output_dir = op.join(APP_DIR, "output")
-        os.makedirs(output_dir, exist_ok=True)
+        # Generation loop (inner loop)
+        for gen_idx in range(num_generations):
+            if cancellation_token.is_cancelled():
+                gr.Info("Generation cancelled")
+                break
+            
+            generation_count += 1
+            # Update progress for multiple generations
+            progress_desc = f"Generating {generation_count}/{total_generations}"
+            if preset_name:
+                progress_desc += f" | Preset: {preset_name}"
+            if num_generations > 1:
+                progress_desc += f" | Generation {gen_idx + 1}/{num_generations}"
+            progress((generation_count / total_generations), desc=progress_desc)
         
-        file_number = get_next_file_number(output_dir)
-        if num_generations > 1:
-            base_filename = f"{file_number:04d}_gen{gen_idx+1:03d}"
-        else:
-            base_filename = f"{file_number:04d}"
-        
-        wav_path = op.join(output_dir, f"{base_filename}.wav")
-        wavfile.write(wav_path, MODEL.cfg.sample_rate, audio_data)
-        output_messages(f"Generated audio saved to: {wav_path}")
-        
-        # Convert to MP3 if requested
-        mp3_path = None
-        if save_mp3:
-            mp3_path = op.join(output_dir, f"{base_filename}.mp3")
-            if convert_wav_to_mp3(wav_path, mp3_path, '192k'):
-                output_messages(f"Generated MP3 saved to: {mp3_path}")
+            # Generate new seed for each iteration after the first
+            if gen_idx > 0:
+                used_seed = random.randint(0, 2147483647)
+                set_seed(used_seed)
+                output_messages(f"Generation {gen_idx + 1}: Using seed: {used_seed}")
+            
+            # Randomize parameters if enabled (for each generation)
+            if randomize_params and gen_idx > 0:  # Keep first generation with original values
+                current_genre = random.choice(GENRES)
+                current_instrument = random.choice(INSTRUMENTS)
+                current_emotion = random.choice(EMOTIONS)
+                current_timbre = random.choice(TIMBRES)
+                current_gender = random.choice(GENDERS)
+                output_messages(f"Randomized: {current_genre}, {current_instrument}, {current_emotion}, {current_timbre}, {current_gender}")
+            
+            # Re-run generation for subsequent iterations
+            if gen_idx > 0:
+                try:
+                    audio_data = MODEL(
+                        song_data["lyrics"], 
+                        f"{current_gender}, {current_timbre}, {current_genre}, {current_emotion}, {current_instrument}",
+                        song_data["audio_path"] if song_data["sample_prompt"] else None,
+                        None,
+                        op.join(APP_DIR, "ckpt/prompt.pt"),
+                        gen_type,
+                        gen_params,
+                        disable_offload=disable_offload,
+                        disable_cache_clear=disable_cache_clear,
+                        disable_fp16=disable_fp16,
+                        disable_sequential=disable_sequential,
+                        progress_callback=progress_callback,
+                        cancellation_token=cancellation_token
+                    )
+                    
+                    if audio_data is None:
+                        continue
+                        
+                    audio_data = audio_data.cpu().permute(1, 0).float().numpy()
+                    
+                except Exception as e:
+                    gr.Error(f"Generation {gen_idx + 1} failed: {str(e)}")
+                    continue
+            
+                # Save the audio with sequential numbering
+            output_dir = op.join(APP_DIR, "output")
+            os.makedirs(output_dir, exist_ok=True)
+            
+            file_number = get_next_file_number(output_dir)
+            # Construct filename based on preset and generation
+            if preset_name and num_generations > 1:
+                base_filename = f"{file_number:04d}_{preset_name}_gen{gen_idx+1:03d}"
+            elif preset_name:
+                base_filename = f"{file_number:04d}_{preset_name}"
+            elif num_generations > 1:
+                base_filename = f"{file_number:04d}_gen{gen_idx+1:03d}"
             else:
-                mp3_path = None
-                output_messages("Failed to convert to MP3")
-        
-        # Create video if image is provided
-        video_path = None
-        if image_path:
-            video_path = op.join(output_dir, f"{base_filename}.mp4")
-            if create_video_from_image_and_audio(image_path, wav_path, video_path):
-                output_messages(f"Generated video saved to: {video_path}")
-            else:
-                video_path = None
-                output_messages("Failed to create video")
-        
-        # For the first generation, update the main outputs
-        if gen_idx == 0:
-            song_data["audio"] = wav_path
-            song_data["mp3"] = mp3_path
-            song_data["video"] = video_path
-        
-        # Save metadata
-        metadata = collect_current_parameters(
-            lyrics, genre, instrument, emotion, timbre, gender,
-            sample_prompt, audio_path, image_path, save_mp3, used_seed,
-            max_gen_length, diffusion_steps, temperature, top_k, top_p,
-            cfg_coef, guidance_scale, use_sampling, extend_stride,
-            gen_type, chunked, chunk_size, record_tokens, record_window,
-            disable_offload, disable_cache_clear, disable_fp16, disable_sequential,
-            num_generations
-        )
-        metadata['timestamp'] = current_time
-        metadata['model'] = ckpt_path
-        metadata['generation_index'] = gen_idx + 1
-        metadata['total_generations'] = num_generations
-        metadata['output_files'] = {
-            'wav': wav_path,
-            'mp3': mp3_path,
-            'mp4': video_path
-        }
-        
-        save_metadata(wav_path, metadata)
-        generated_files.append({'wav': wav_path, 'mp3': mp3_path, 'mp4': video_path})
+                base_filename = f"{file_number:04d}"
+            
+            wav_path = op.join(output_dir, f"{base_filename}.wav")
+            wavfile.write(wav_path, MODEL.cfg.sample_rate, audio_data)
+            output_messages(f"Generated audio saved to: {wav_path}")
+            
+            # Convert to MP3 if requested
+            mp3_path = None
+            if save_mp3:
+                mp3_path = op.join(output_dir, f"{base_filename}.mp3")
+                if convert_wav_to_mp3(wav_path, mp3_path, '192k'):
+                    output_messages(f"Generated MP3 saved to: {mp3_path}")
+                else:
+                    mp3_path = None
+                    output_messages("Failed to convert to MP3")
+            
+            # Create video if image is provided
+            video_path = None
+            if image_path:
+                video_path = op.join(output_dir, f"{base_filename}.mp4")
+                if create_video_from_image_and_audio(image_path, wav_path, video_path):
+                    output_messages(f"Generated video saved to: {video_path}")
+                else:
+                    video_path = None
+                    output_messages("Failed to create video")
+            
+            # For the first generation, update the main outputs
+            if gen_idx == 0:
+                song_data["audio"] = wav_path
+                song_data["mp3"] = mp3_path
+                song_data["video"] = video_path
+            
+            # Save metadata (use actual generated values, not original if randomized)
+            metadata = collect_current_parameters(
+                lyrics, current_genre, current_instrument, current_emotion, current_timbre, current_gender,
+                sample_prompt, audio_path, image_path, save_mp3, used_seed,
+                max_gen_length, diffusion_steps, temperature, top_k, top_p,
+                cfg_coef, guidance_scale, use_sampling, extend_stride,
+                gen_type, chunked, chunk_size, record_tokens, record_window,
+                disable_offload, disable_cache_clear, disable_fp16, disable_sequential,
+                num_generations, loop_presets, randomize_params
+            )
+            metadata['timestamp'] = current_time
+            metadata['model'] = ckpt_path
+            metadata['generation_index'] = gen_idx + 1
+            metadata['total_generations'] = num_generations
+            metadata['output_files'] = {
+                'wav': wav_path,
+                'mp3': mp3_path,
+                'mp4': video_path
+            }
+            
+            save_metadata(wav_path, metadata)
+            generated_files.append({'wav': wav_path, 'mp3': mp3_path, 'mp4': video_path})
     
     # Update history
     history.append({"role": "user", "content": f"Generate {num_generations} song(s) with lyrics: {lyrics[:50]}..."})
@@ -609,6 +670,18 @@ with gr.Blocks(title="SECourses LeVo Song Generation App V1",theme=gr.themes.Sof
                                 scale=3
                             )
                             save_preset_btn = gr.Button("Save Preset", variant="secondary", scale=1)
+                        
+                        loop_presets = gr.Checkbox(
+                            label="Loop all presets",
+                            value=False,
+                            info="Generate songs using each saved preset"
+                        )
+                        
+                        randomize_params = gr.Checkbox(
+                            label="Randomize genre, instrument, emotion, timbre & gender",
+                            value=False,
+                            info="Randomly select values from dropdowns for each generation"
+                        )
                     
                     with gr.Row():
                         submit_btn = gr.Button("Generate Song", variant="primary")
@@ -884,11 +957,6 @@ with gr.Blocks(title="SECourses LeVo Song Generation App V1",theme=gr.themes.Sof
                             value=True,
                             info="Skip generation if output files already exist"
                         )
-                        loop_presets = gr.Checkbox(
-                            label="Loop all presets",
-                            value=False,
-                            info="Generate songs using each saved preset"
-                        )
                     with gr.Row():
                         batch_process_btn = gr.Button("Start Batch Processing", variant="primary")
                     
@@ -962,11 +1030,11 @@ with gr.Blocks(title="SECourses LeVo Song Generation App V1",theme=gr.themes.Sof
             return gr.Dropdown(choices=preset_manager.get_preset_list())
         
         # Collect all parameters
-        param_values = list(args[:30])  # All UI parameters (30 parameters including num_generations)
+        param_values = list(args[:32])  # All UI parameters (32 parameters including new checkboxes)
         param_names = [
             'lyrics', 'genre', 'instrument', 'emotion', 'timbre', 'gender',
             'sample_prompt', 'audio_path', 'image_path', 'save_mp3', 'seed',
-            'num_generations', 'max_gen_length', 'diffusion_steps', 'temperature', 'top_k', 'top_p',
+            'num_generations', 'loop_presets', 'randomize_params', 'max_gen_length', 'diffusion_steps', 'temperature', 'top_k', 'top_p',
             'cfg_coef', 'guidance_scale', 'use_sampling', 'extend_stride',
             'gen_type', 'chunked', 'chunk_size', 'record_tokens', 'record_window',
             'disable_offload', 'disable_cache_clear', 'disable_fp16', 'disable_sequential'
@@ -987,12 +1055,12 @@ with gr.Blocks(title="SECourses LeVo Song Generation App V1",theme=gr.themes.Sof
     def handle_load_preset(preset_name):
         """Load a preset and update all UI components"""
         if not preset_name:
-            return [gr.update()] * 30  # Updated to 30 for num_generations
+            return [gr.update()] * 32  # Updated to 32 for all parameters
         
         preset_data, message = preset_manager.load_preset(preset_name)
         if preset_data is None:
             gr.Error(message)
-            return [gr.update()] * 30
+            return [gr.update()] * 32
         
         # Default values matching UI defaults
         defaults = {
@@ -1008,6 +1076,8 @@ with gr.Blocks(title="SECourses LeVo Song Generation App V1",theme=gr.themes.Sof
             'save_mp3': True,
             'seed': -1,
             'num_generations': 1,
+            'loop_presets': False,
+            'randomize_params': False,
             'max_gen_length': 3750,
             'diffusion_steps': 50,
             'temperature': 1.0,
@@ -1049,6 +1119,8 @@ with gr.Blocks(title="SECourses LeVo Song Generation App V1",theme=gr.themes.Sof
             values['save_mp3'],
             values['seed'],
             values['num_generations'],
+            values['loop_presets'],
+            values['randomize_params'],
             values['max_gen_length'],
             values['diffusion_steps'],
             values['temperature'],
@@ -1077,7 +1149,7 @@ with gr.Blocks(title="SECourses LeVo Song Generation App V1",theme=gr.themes.Sof
     all_inputs = [
         lyrics, genre, instrument, emotion, timbre, gender,
         sample_prompt, audio_path, image_upload, save_mp3_check, seed_input,
-        num_generations, max_gen_length, diffusion_steps, temperature, top_k, top_p,
+        num_generations, loop_presets, randomize_params, max_gen_length, diffusion_steps, temperature, top_k, top_p,
         cfg_coef, guidance_scale, use_sampling, extend_stride,
         gen_type, chunked, chunk_size, record_tokens, record_window,
         disable_offload, disable_cache_clear, disable_fp16, disable_sequential
@@ -1138,7 +1210,7 @@ with gr.Blocks(title="SECourses LeVo Song Generation App V1",theme=gr.themes.Sof
             cfg_coef, guidance_scale, use_sampling, extend_stride,
             gen_type, chunked, chunk_size, record_tokens, record_window,
             disable_offload, disable_cache_clear, disable_fp16, disable_sequential,
-            num_generations, history, session
+            num_generations, loop_presets, randomize_params, history, session
         ],
         outputs=[output_audio, output_video, history, history_display, cancel_btn, progress_text]
     )
@@ -1160,7 +1232,8 @@ with gr.Blocks(title="SECourses LeVo Song Generation App V1",theme=gr.themes.Sof
             max_gen_length, diffusion_steps, temperature, top_k, top_p,
             cfg_coef, guidance_scale, use_sampling, extend_stride,
             gen_type, chunked, chunk_size, record_tokens, record_window,
-            disable_offload, disable_cache_clear, disable_fp16, disable_sequential
+            disable_offload, disable_cache_clear, disable_fp16, disable_sequential,
+            randomize_params
         ],
         outputs=[cancel_btn, progress_text, batch_status]
     )
