@@ -12,17 +12,17 @@ import torch.nn.functional as F
 import torchaudio
 
 from einops import repeat
-from tools.torch_tools import wav_to_fbank
+from .tools.torch_tools import wav_to_fbank
 
 from diffusers.utils.torch_utils import randn_tensor
 from transformers import HubertModel
-from libs.rvq.descript_quantize3 import ResidualVectorQuantize
+from .libs.rvq.descript_quantize3 import ResidualVectorQuantize
 
-from models_gpt.models.gpt2_rope2_time_new_correct_mask_noncasual_reflow import GPT2Model
-from models_gpt.models.gpt2_config import GPT2Config
+from .models_gpt.models.gpt2_rope2_time_new_correct_mask_noncasual_reflow import GPT2Model
+from .models_gpt.models.gpt2_config import GPT2Config
 
 from torch.cuda.amp import autocast
-from our_MERT_BESTRQ.test import load_model
+from .our_MERT_BESTRQ.test import load_model
 
 class HubertModelWithFinalProj(HubertModel):
     def __init__(self, config):

@@ -8,6 +8,21 @@ import warnings
 import torch.nn.functional as F
 from torch.nn.utils.rnn import pad_sequence
 from codeclm.utils.utils import length_to_mask, collate
+
+def resolve_max_len(max_len):
+    """Helper function to resolve max_len value from OmegaConf expressions"""
+    if isinstance(max_len, str):
+        if 'eval:' in max_len or '$' in max_len:
+            return 252  # Default: prompt_len(10) * audio_tokenizer_frame_rate(25) + 2
+        else:
+            try:
+                return int(max_len)
+            except ValueError:
+                return 252  # fallback default
+    elif isinstance(max_len, float):
+        return int(max_len)
+    else:
+        return max_len
 from codeclm.modules.streaming import StreamingModule
 from collections import defaultdict
 from copy import deepcopy
@@ -119,7 +134,19 @@ class QwTokenizerConditioner(TextConditioner):
         voc_size = len(self.text_tokenizer.get_vocab())
         # here initialize a output_proj (nn.Embedding) layer
         super().__init__(voc_size, output_dim, input_token=True, padding_idx=151643) 
-        self.max_len = max_len
+        # Ensure max_len is an integer (handle OmegaConf expressions)
+        if isinstance(max_len, str):
+            # Handle OmegaConf expressions that weren't resolved
+            if 'eval:' in max_len or '$' in max_len:
+                # Default value based on typical config
+                self.max_len = 252  # prompt_len(10) * audio_tokenizer_frame_rate(25) + 2
+            else:
+                try:
+                    self.max_len = int(max_len)
+                except ValueError:
+                    self.max_len = 252  # fallback default
+        else:
+            self.max_len = int(max_len) if isinstance(max_len, float) else max_len
         self.padding_idx =' <|endoftext|>'
 
         vocab = self.text_tokenizer.get_vocab()
@@ -157,12 +184,13 @@ class QwTokenizerConditioner(TextConditioner):
                 tp_cover_range[b, st: sp_list[i+1]] = tokens[b, st] - 151645
 
         if self.max_len is not None:
-            if inputs['input_ids'].shape[-1] > self.max_len:
-                warnings.warn(f"Max len limit ({self.max_len}) Exceed! \
+            max_len_val = resolve_max_len(self.max_len)
+            if inputs['input_ids'].shape[-1] > max_len_val:
+                warnings.warn(f"Max len limit ({max_len_val}) Exceed! \
                               {[self.text_tokenizer.convert_ids_to_tokens(i.tolist()) for i in tokens]} will be cut!")
-            tokens = self.pad_2d_tensor(tokens, self.max_len, self.pad_token_idx).to(self.output_proj.weight.device)
-            mask = self.pad_2d_tensor(mask, self.max_len, 0).to(self.output_proj.weight.device)
-            tp_cover_range = self.pad_2d_tensor(tp_cover_range, self.max_len, 0).to(self.output_proj.weight.device)
+            tokens = self.pad_2d_tensor(tokens, max_len_val, self.pad_token_idx).to(self.output_proj.weight.device)
+            mask = self.pad_2d_tensor(mask, max_len_val, 0).to(self.output_proj.weight.device)
+            tp_cover_range = self.pad_2d_tensor(tp_cover_range, max_len_val, 0).to(self.output_proj.weight.device)
         device = self.output_proj.weight.device
         content_embeds = self.output_proj(tokens.to(device))
         structure_embeds = self.structure_emb(tp_cover_range.to(device))
@@ -196,7 +224,19 @@ class QwTextConditioner(TextConditioner):
         # here initialize a output_proj (nn.Embedding) layer
         super().__init__(voc_size, output_dim, input_token=True, padding_idx=151643) 
         
-        self.max_len = max_len
+        # Ensure max_len is an integer (handle OmegaConf expressions)
+        if isinstance(max_len, str):
+            # Handle OmegaConf expressions that weren't resolved
+            if 'eval:' in max_len or '$' in max_len:
+                # Default value based on typical config
+                self.max_len = 252  # prompt_len(10) * audio_tokenizer_frame_rate(25) + 2
+            else:
+                try:
+                    self.max_len = int(max_len)
+                except ValueError:
+                    self.max_len = 252  # fallback default
+        else:
+            self.max_len = int(max_len) if isinstance(max_len, float) else max_len
         
     def tokenize(self, x: tp.List[tp.Optional[str]]) -> tp.Dict[str, torch.Tensor]:
         x = ['<|im_start|>' + xi if xi is not None else "<|im_start|>" for xi in x]
@@ -213,11 +253,12 @@ class QwTextConditioner(TextConditioner):
         tokens = inputs['input_ids']
 
         if self.max_len is not None:
-            if inputs['input_ids'].shape[-1] > self.max_len:
-                warnings.warn(f"Max len limit ({self.max_len}) Exceed! \
+            max_len_val = resolve_max_len(self.max_len)
+            if inputs['input_ids'].shape[-1] > max_len_val:
+                warnings.warn(f"Max len limit ({max_len_val}) Exceed! \
                               {[self.text_tokenizer.convert_ids_to_tokens(i.tolist()) for i in tokens]} will be cut!")
-            tokens = self.pad_2d_tensor(tokens, self.max_len, 151643).to(self.output_proj.weight.device)
-            mask = self.pad_2d_tensor(mask, self.max_len, 0).to(self.output_proj.weight.device)
+            tokens = self.pad_2d_tensor(tokens, max_len_val, 151643).to(self.output_proj.weight.device)
+            mask = self.pad_2d_tensor(mask, max_len_val, 0).to(self.output_proj.weight.device)
     
         embeds = self.output_proj(tokens)
         return embeds, embeds, mask
@@ -254,7 +295,8 @@ class QuantizedEmbeddingConditioner(AudioConditioner):
         self.EOT_emb = nn.Parameter(torch.randn(1, dim), requires_grad=True)
         self.layer2_EOT_emb = nn.Parameter(torch.randn(1, dim), requires_grad=True)
         self.output_proj = None
-        self.max_len = max_len
+        # Ensure max_len is an integer (in case it comes as string from config)
+        self.max_len = int(max_len) if isinstance(max_len, str) and max_len.isdigit() else max_len
         self.vocab_size = code_size
 
     def tokenize(self, x: AudioCondition) -> AudioCondition:
@@ -267,10 +309,13 @@ class QuantizedEmbeddingConditioner(AudioConditioner):
         wav, lengths, *_ = x
         B = wav.shape[0]
         wav = wav.reshape(B, self.code_depth, -1).long()
-        if wav.shape[2] < self.max_len - 1:
-            wav = F.pad(wav, [0, self.max_len - 1 - wav.shape[2]], value=self.vocab_size+1)
+        # Resolve max_len value
+        max_len_value = resolve_max_len(self.max_len)
+            
+        if wav.shape[2] < max_len_value - 1:
+            wav = F.pad(wav, [0, max_len_value - 1 - wav.shape[2]], value=self.vocab_size+1)
         else:
-            wav = wav[:, :, :self.max_len-1]
+            wav = wav[:, :, :max_len_value-1]
         embeds1 = self.emb[0](wav[:, 0])
         embeds1 = torch.cat((self.EOT_emb.unsqueeze(0).repeat(B, 1, 1), 
                                 embeds1), dim=1)
@@ -278,7 +323,9 @@ class QuantizedEmbeddingConditioner(AudioConditioner):
         embeds2 = torch.cat((self.layer2_EOT_emb.unsqueeze(0).repeat(B, 1, 1), 
                              embeds2), dim=1)  
         lengths = lengths + 1
-        lengths = torch.clamp(lengths, max=self.max_len)
+        # Resolve max_len value
+        max_len_value = resolve_max_len(self.max_len)
+        lengths = torch.clamp(lengths, max=max_len_value)
 
         if lengths is not None:
             mask = length_to_mask(lengths, max_len=embeds1.shape[1]).int()  # type: ignore

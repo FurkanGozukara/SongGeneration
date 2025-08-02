@@ -3,7 +3,7 @@ import torchaudio
 import random
 import itertools
 import numpy as np
-from tools.mix import mix
+from .mix import mix
 
 
 def normalize_wav(waveform):

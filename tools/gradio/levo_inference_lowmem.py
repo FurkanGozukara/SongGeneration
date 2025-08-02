@@ -21,10 +21,16 @@ class LeVoInference(torch.nn.Module):
         super().__init__()
 
         torch.backends.cudnn.enabled = False 
-        OmegaConf.register_new_resolver("eval", lambda x: eval(x))
-        OmegaConf.register_new_resolver("concat", lambda *x: [xxx for xx in x for xxx in xx])
-        OmegaConf.register_new_resolver("get_fname", lambda: 'default')
-        OmegaConf.register_new_resolver("load_yaml", lambda x: list(OmegaConf.load(x)))
+        # Use register_resolver for newer OmegaConf versions
+        if hasattr(OmegaConf, 'register_new_resolver'):
+            register_method = OmegaConf.register_new_resolver
+        else:
+            register_method = OmegaConf.register_resolver
+            
+        register_method("eval", lambda x: eval(x))
+        register_method("concat", lambda *x: [xxx for xx in x for xxx in xx])
+        register_method("get_fname", lambda: 'default')
+        register_method("load_yaml", lambda x: list(OmegaConf.load(x)))
 
         cfg_path = os.path.join(ckpt_path, 'config.yaml')
         self.pt_path = os.path.join(ckpt_path, 'model.pt')

@@ -2,3 +2,7 @@ launchs/
 **/__pycache__
 sample/generated/
 venv
+.gradio/
+ckpt/
+output/
+third_party/

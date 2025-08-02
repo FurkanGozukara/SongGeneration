@@ -37,20 +37,66 @@ from transformers.modeling_outputs import (
     SequenceClassifierOutputWithPast,
     TokenClassifierOutput,
 )
-from transformers.modeling_utils import PreTrainedModel, SequenceSummary
+from transformers.modeling_utils import PreTrainedModel
+try:
+    from transformers.modeling_utils import SequenceSummary
+except ImportError:
+    try:
+        # Try newer location
+        from transformers.models.gpt2.modeling_gpt2 import SequenceSummary
+    except ImportError:
+        # If SequenceSummary is not available, define a simple version
+        import torch.nn as nn
+        
+        class SequenceSummary(nn.Module):
+            """Simple sequence summary implementation for compatibility"""
+            def __init__(self, config):
+                super().__init__()
+                self.summary_type = getattr(config, 'summary_type', 'last')
+                self.summary = nn.Identity()
+                
+            def forward(self, hidden_states, cls_index=None):
+                if self.summary_type == 'last':
+                    return hidden_states[:, -1]
+                elif self.summary_type == 'first':
+                    return hidden_states[:, 0]
+                elif self.summary_type == 'mean':
+                    return hidden_states.mean(dim=1)
+                elif self.summary_type == 'cls_index' and cls_index is not None:
+                    return hidden_states.gather(1, cls_index.unsqueeze(-1).expand(-1, -1, hidden_states.size(-1))).squeeze(1)
+                else:
+                    return hidden_states[:, -1]
 from transformers.pytorch_utils import Conv1D, find_pruneable_heads_and_indices, prune_conv1d_layer
 from transformers.utils import (
     ModelOutput,
     add_code_sample_docstrings,
     add_start_docstrings,
     add_start_docstrings_to_model_forward,
-    is_flash_attn_2_available,
-    is_flash_attn_greater_or_equal_2_10,
     logging,
     replace_return_docstrings,
 )
+
+# Handle flash attention imports for different transformers versions
+try:
+    from transformers.utils import is_flash_attn_2_available, is_flash_attn_greater_or_equal_2_10
+except ImportError:
+    # Fallback for older or newer versions
+    def is_flash_attn_2_available():
+        try:
+            import flash_attn
+            return True
+        except ImportError:
+            return False
+    
+    def is_flash_attn_greater_or_equal_2_10():
+        try:
+            import flash_attn
+            from packaging import version
+            return version.parse(flash_attn.__version__) >= version.parse("2.1.0")
+        except:
+            return False
 from transformers.utils.model_parallel_utils import assert_device_map, get_device_map
-from models_gpt.models.gpt2_config import GPT2Config
+from .gpt2_config import GPT2Config
 
 
 if is_flash_attn_2_available():
