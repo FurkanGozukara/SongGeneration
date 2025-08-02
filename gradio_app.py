@@ -27,6 +27,7 @@ from logic.file_utils import save_metadata, convert_wav_to_mp3, create_video_fro
 from logic.batch_processing import BatchProcessor
 from logic.ui_progress import GradioProgressTracker, create_progress_callback, format_eta
 from logic.preset_manager import PresetManager
+from logic.progress_interceptor import intercept_progress
 
 EXAMPLE_LYRICS = """
 example
@@ -439,25 +440,27 @@ def submit_lyrics(
         current_timbre = timbre
         current_gender = gender
         
-        audio_data = MODEL(
-            song_data["lyrics"], 
-            f"{current_gender}, {current_timbre}, {current_genre}, {current_emotion}, {current_instrument}",
-            song_data["audio_path"] if song_data["sample_prompt"] else None,
-            None,  # genre parameter (None since we're using description)
-            op.join(APP_DIR, "ckpt/prompt.pt"),  # auto_prompt_path
-            gen_type,  # gen_type from UI
-            gen_params,  # params
-            disable_offload=disable_offload,
-            disable_cache_clear=disable_cache_clear,
-            disable_fp16=disable_fp16,
-            disable_sequential=disable_sequential,
-            progress_callback=progress_callback,
-            cancellation_token=cancellation_token
-        )
+        # Use progress interceptor to capture tqdm output
+        with intercept_progress(progress_callback):
+            audio_data = MODEL(
+                song_data["lyrics"], 
+                f"{current_gender}, {current_timbre}, {current_genre}, {current_emotion}, {current_instrument}",
+                song_data["audio_path"] if song_data["sample_prompt"] else None,
+                None,  # genre parameter (None since we're using description)
+                op.join(APP_DIR, "ckpt/prompt.pt"),  # auto_prompt_path
+                gen_type,  # gen_type from UI
+                gen_params,  # params
+                disable_offload=disable_offload,
+                disable_cache_clear=disable_cache_clear,
+                disable_fp16=disable_fp16,
+                disable_sequential=disable_sequential,
+                progress_callback=progress_callback,
+                cancellation_token=cancellation_token
+            )
         
         if audio_data is None:
             gr.Info("Generation cancelled")
-            return None, None, history, process_history(history)
+            return None, None, history, process_history(history), gr.update(visible=False), gr.update(visible=False)
             
         audio_data = audio_data.cpu().permute(1, 0).float().numpy()
         
@@ -540,21 +543,22 @@ def submit_lyrics(
             # Re-run generation for subsequent iterations
             if gen_idx > 0:
                 try:
-                    audio_data = MODEL(
-                        song_data["lyrics"], 
-                        f"{current_gender}, {current_timbre}, {current_genre}, {current_emotion}, {current_instrument}",
-                        song_data["audio_path"] if song_data["sample_prompt"] else None,
-                        None,
-                        op.join(APP_DIR, "ckpt/prompt.pt"),
-                        gen_type,
-                        gen_params,
-                        disable_offload=disable_offload,
-                        disable_cache_clear=disable_cache_clear,
-                        disable_fp16=disable_fp16,
-                        disable_sequential=disable_sequential,
-                        progress_callback=progress_callback,
-                        cancellation_token=cancellation_token
-                    )
+                    with intercept_progress(progress_callback):
+                        audio_data = MODEL(
+                            song_data["lyrics"], 
+                            f"{current_gender}, {current_timbre}, {current_genre}, {current_emotion}, {current_instrument}",
+                            song_data["audio_path"] if song_data["sample_prompt"] else None,
+                            None,
+                            op.join(APP_DIR, "ckpt/prompt.pt"),
+                            gen_type,
+                            gen_params,
+                            disable_offload=disable_offload,
+                            disable_cache_clear=disable_cache_clear,
+                            disable_fp16=disable_fp16,
+                            disable_sequential=disable_sequential,
+                            progress_callback=progress_callback,
+                            cancellation_token=cancellation_token
+                        )
                     
                     if audio_data is None:
                         continue
@@ -635,9 +639,14 @@ def submit_lyrics(
     
     # Update history
     history.append({"role": "user", "content": f"Generate {num_generations} song(s) with lyrics: {lyrics[:50]}..."})
-    history.append({"role": "assistant", "content": f"Generated {len(generated_files)} song(s) successfully!", "song": song_data})
     
-    # Hide cancel button and progress
+    # Check if cancelled
+    if cancellation_token.is_cancelled():
+        history.append({"role": "assistant", "content": f"Generation cancelled. Generated {len(generated_files)} song(s) before cancellation.", "song": song_data if generated_files else None})
+    else:
+        history.append({"role": "assistant", "content": f"Generated {len(generated_files)} song(s) successfully!", "song": song_data})
+    
+    # Hide cancel button and progress when complete
     yield song_data["audio"], song_data.get("video"), history, process_history(history), gr.update(visible=False), gr.update(visible=False)
 
 # Create Gradio interface
@@ -651,8 +660,9 @@ with gr.Blocks(title="SECourses LeVo Song Generation App V1",theme=gr.themes.Sof
     with gr.Row():
         cancel_btn = gr.Button("🛑 Cancel Generation", variant="stop", visible=False)
     
-    # Progress display
-    progress_text = gr.Markdown("", visible=False)
+    # Progress display with detailed status
+    with gr.Row():
+        progress_text = gr.Markdown("", visible=False)
     
     # Main tabs at the top
     with gr.Tabs():
@@ -1127,24 +1137,61 @@ with gr.Blocks(title="SECourses LeVo Song Generation App V1",theme=gr.themes.Sof
     demo.load(fn=update_char_count_and_duration, inputs=[lyrics], outputs=[char_counter])
     
     # Preset functionality
-    def handle_save_preset(preset_name, *args):
+    def handle_save_preset(preset_name, current_preset, *args):
         """Save current settings as a preset"""
+        # If no preset name entered, use the currently selected preset
         if not preset_name:
-            gr.Info("Please enter a preset name")
-            return gr.Dropdown(choices=preset_manager.get_preset_list())
+            if current_preset:
+                preset_name = current_preset
+                gr.Info(f"Overwriting preset: {preset_name}")
+            else:
+                gr.Info("Please enter a preset name or select an existing preset to overwrite")
+                return gr.Dropdown(choices=preset_manager.get_preset_list())
         
-        # Collect all parameters
-        param_values = list(args[:32])  # All UI parameters (32 parameters including new checkboxes)
-        param_names = [
-            'lyrics', 'genre', 'instrument', 'emotion', 'timbre', 'gender',
-            'sample_prompt', 'audio_path', 'image_path', 'save_mp3', 'seed',
-            'num_generations', 'loop_presets', 'randomize_params', 'max_gen_length', 'diffusion_steps', 'temperature', 'top_k', 'top_p',
-            'cfg_coef', 'guidance_scale', 'use_sampling', 'extend_stride',
-            'gen_type', 'chunked', 'chunk_size', 'record_tokens', 'record_window',
-            'disable_offload', 'disable_cache_clear', 'disable_fp16', 'disable_sequential'
-        ]
+        # Collect all parameters - args order matches all_inputs order
+        # all_inputs = [lyrics, genre, instrument, emotion, timbre, gender,
+        #              sample_prompt, audio_path, image_upload, save_mp3_check, seed_input,
+        #              num_generations, loop_presets, randomize_params, ...]
+        param_values = list(args)
         
-        preset_data = dict(zip(param_names, param_values))
+        # Create preset data matching the order
+        preset_data = {
+            'lyrics': param_values[0],
+            'genre': param_values[1],
+            'instrument': param_values[2],
+            'emotion': param_values[3],
+            'timbre': param_values[4],
+            'gender': param_values[5],
+            'sample_prompt': param_values[6],
+            'audio_path': param_values[7],
+            'image_path': param_values[8],  # This is image_upload in all_inputs
+            'save_mp3': param_values[9],
+            'seed': param_values[10],
+            'num_generations': param_values[11],
+            'loop_presets': param_values[12],
+            'randomize_params': param_values[13],
+            'max_gen_length': param_values[14],
+            'diffusion_steps': param_values[15],
+            'temperature': param_values[16],
+            'top_k': param_values[17],
+            'top_p': param_values[18],
+            'cfg_coef': param_values[19],
+            'guidance_scale': param_values[20],
+            'use_sampling': param_values[21],
+            'extend_stride': param_values[22],
+            'gen_type': param_values[23],
+            'chunked': param_values[24],
+            'chunk_size': param_values[25],
+            'record_tokens': param_values[26],
+            'record_window': param_values[27],
+            'disable_offload': param_values[28],
+            'disable_cache_clear': param_values[29],
+            'disable_fp16': param_values[30],
+            'disable_sequential': param_values[31]
+        }
+        # Debug: print specific values to verify
+        print(f"Saving preset '{preset_name}' with loop_presets={preset_data.get('loop_presets')}, randomize_params={preset_data.get('randomize_params')}")
+        
         success, message = preset_manager.save_preset(preset_name, preset_data)
         
         if success:
@@ -1165,6 +1212,9 @@ with gr.Blocks(title="SECourses LeVo Song Generation App V1",theme=gr.themes.Sof
         if preset_data is None:
             gr.Error(message)
             return [gr.update()] * 32
+        
+        # Debug: print loaded values
+        print(f"Loading preset '{preset_name}' with loop_presets={preset_data.get('loop_presets')}, randomize_params={preset_data.get('randomize_params')}")
         
         # Default values matching UI defaults
         defaults = {
@@ -1260,14 +1310,14 @@ with gr.Blocks(title="SECourses LeVo Song Generation App V1",theme=gr.themes.Sof
     ]
     
     # Modified to return both dropdown and clear the input field
-    def handle_save_and_clear(preset_name, *args):
-        dropdown_update = handle_save_preset(preset_name, *args)
+    def handle_save_and_clear(preset_name, current_preset, *args):
+        dropdown_update = handle_save_preset(preset_name, current_preset, *args)
         # Return updates for both dropdown and input field
         return dropdown_update, gr.Textbox(value="")  # Clear the input field
     
     save_preset_btn.click(
         fn=handle_save_and_clear,
-        inputs=[preset_name_input] + all_inputs,
+        inputs=[preset_name_input, preset_dropdown] + all_inputs,
         outputs=[preset_dropdown, preset_name_input]
     ).then(
         # Automatically load the preset after saving

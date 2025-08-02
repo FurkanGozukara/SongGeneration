@@ -93,15 +93,47 @@ def create_progress_callback(progress_tracker: GradioProgressTracker, progress_b
         # Update Gradio progress bar if available
         if progress_bar:
             progress = progress_info.get('progress', 0)
-            message = progress_tracker.get_progress_text()
+            
+            # Build comprehensive message including detailed status
+            message_parts = []
+            
+            # Add phase info
+            if progress_info.get('phase'):
+                message_parts.append(progress_info['phase'])
+                
+            # Add detailed progress bar if available
+            if progress_info.get('detailed_status'):
+                message_parts.append(progress_info['detailed_status'])
+            elif progress_info.get('current_step') and progress_info.get('total_steps'):
+                # Create our own progress visualization
+                current = progress_info['current_step']
+                total = progress_info['total_steps']
+                percent = int((current / total) * 100)
+                bar = create_progress_bar(current, total, width=30)
+                message_parts.append(bar)
+            
+            # Add speed info
+            if progress_info.get('speed'):
+                message_parts.append(f"Speed: {progress_info['speed']}")
+                
+            # Add other info from tracker
+            tracker_text = progress_tracker.get_progress_text()
+            if tracker_text and tracker_text != "Processing...":
+                message_parts.append(tracker_text)
+            
+            # Combine all parts
+            message = " | ".join(filter(None, message_parts))
             progress_bar(progress, desc=message)
             
-        # Also update via gr.Info for visibility
-        if 'message' in progress_info and progress_info['message']:
+        # Also update via gr.Info for visibility of important messages
+        if 'message' in progress_info and progress_info['message'] and 'Running' in progress_info['message']:
             gr.Info(progress_info['message'])
             
         # Print to console as well
-        print(f"Progress: {progress_tracker.get_progress_text()}")
+        if progress_info.get('detailed_status'):
+            print(f"Progress: {progress_info['detailed_status']}")
+        else:
+            print(f"Progress: {progress_tracker.get_progress_text()}")
         
     return callback
 
