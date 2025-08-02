@@ -91,6 +91,172 @@ EMOTIONS = load_options('emotion.txt')
 TIMBRES = load_options('timbre.txt')
 GENDERS = load_options('gender.txt')
 
+# Preset directory
+PRESET_DIR = op.join(APP_DIR, 'presets')
+os.makedirs(PRESET_DIR, exist_ok=True)
+
+def get_preset_list():
+    """Get list of available presets"""
+    if not os.path.exists(PRESET_DIR):
+        return []
+    presets = [f[:-5] for f in os.listdir(PRESET_DIR) if f.endswith('.json')]
+    return sorted(presets)
+
+def save_preset(preset_name, preset_data):
+    """Save preset to file"""
+    if not preset_name:
+        return False, "Please enter a preset name"
+    
+    preset_path = op.join(PRESET_DIR, f"{preset_name}.json")
+    try:
+        with open(preset_path, 'w', encoding='utf-8') as f:
+            json.dump(preset_data, f, indent=2, ensure_ascii=False)
+        return True, f"Preset '{preset_name}' saved successfully"
+    except Exception as e:
+        return False, f"Error saving preset: {str(e)}"
+
+def load_preset(preset_name):
+    """Load preset from file"""
+    if not preset_name:
+        return None, "No preset selected"
+    
+    preset_path = op.join(PRESET_DIR, f"{preset_name}.json")
+    if not os.path.exists(preset_path):
+        return None, f"Preset '{preset_name}' not found"
+    
+    try:
+        with open(preset_path, 'r', encoding='utf-8') as f:
+            preset_data = json.load(f)
+        return preset_data, f"Preset '{preset_name}' loaded successfully"
+    except Exception as e:
+        return None, f"Error loading preset: {str(e)}"
+
+def get_last_used_preset():
+    """Get the name of the last used preset"""
+    last_preset_path = op.join(PRESET_DIR, '_last_used.txt')
+    if os.path.exists(last_preset_path):
+        try:
+            with open(last_preset_path, 'r', encoding='utf-8') as f:
+                return f.read().strip()
+        except:
+            pass
+    return None
+
+def set_last_used_preset(preset_name):
+    """Save the name of the last used preset"""
+    last_preset_path = op.join(PRESET_DIR, '_last_used.txt')
+    try:
+        with open(last_preset_path, 'w', encoding='utf-8') as f:
+            f.write(preset_name)
+    except:
+        pass
+
+def save_metadata(file_path, metadata):
+    """Save metadata to text file alongside audio file"""
+    metadata_path = file_path.rsplit('.', 1)[0] + '.txt'
+    try:
+        with open(metadata_path, 'w', encoding='utf-8') as f:
+            f.write("=== SONG GENERATION METADATA ===\n")
+            f.write(f"Generated: {metadata.get('timestamp', 'Unknown')}\n")
+            f.write(f"Model: {metadata.get('model', 'Unknown')}\n\n")
+            
+            f.write("=== USER INPUTS ===\n")
+            f.write(f"Lyrics:\n{metadata.get('lyrics', '')}\n\n")
+            
+            f.write("=== GENERATION PARAMETERS ===\n")
+            for key, value in sorted(metadata.items()):
+                if key not in ['timestamp', 'model', 'lyrics']:
+                    f.write(f"{key}: {value}\n")
+            
+            f.write("\n=== END OF METADATA ===\n")
+        return True
+    except Exception as e:
+        print(f"Error saving metadata: {e}")
+        return False
+
+def collect_current_parameters(
+    lyrics, genre, instrument, emotion, timbre, gender,
+    sample_prompt, audio_path, image_path, save_mp3, seed,
+    max_gen_length, diffusion_steps, temperature, top_k, top_p,
+    cfg_coef, guidance_scale, use_sampling, extend_stride,
+    gen_type, chunked, chunk_size, record_tokens, record_window,
+    disable_offload, disable_cache_clear, disable_fp16, disable_sequential
+):
+    """Collect all current parameters into a dictionary"""
+    return {
+        'lyrics': lyrics,
+        'genre': genre,
+        'instrument': instrument,
+        'emotion': emotion,
+        'timbre': timbre,
+        'gender': gender,
+        'sample_prompt': sample_prompt,
+        'audio_path': audio_path,
+        'image_path': image_path,
+        'save_mp3': save_mp3,
+        'seed': seed,
+        'max_gen_length': max_gen_length,
+        'diffusion_steps': diffusion_steps,
+        'temperature': temperature,
+        'top_k': top_k,
+        'top_p': top_p,
+        'cfg_coef': cfg_coef,
+        'guidance_scale': guidance_scale,
+        'use_sampling': use_sampling,
+        'extend_stride': extend_stride,
+        'gen_type': gen_type,
+        'chunked': chunked,
+        'chunk_size': chunk_size,
+        'record_tokens': record_tokens,
+        'record_window': record_window,
+        'disable_offload': disable_offload,
+        'disable_cache_clear': disable_cache_clear,
+        'disable_fp16': disable_fp16,
+        'disable_sequential': disable_sequential
+    }
+
+def apply_preset_to_ui(preset_data):
+    """Convert preset data to UI values, handling missing keys gracefully"""
+    # Default values matching UI defaults
+    defaults = {
+        'lyrics': EXAMPLE_LYRICS,
+        'genre': 'electronic',
+        'instrument': 'synthesizer and drums',
+        'emotion': 'uplifting',
+        'timbre': 'bright',
+        'gender': 'male',
+        'sample_prompt': False,
+        'audio_path': None,
+        'image_path': None,
+        'save_mp3': True,
+        'seed': -1,
+        'max_gen_length': 3750,
+        'diffusion_steps': 50,
+        'temperature': 1.0,
+        'top_k': 250,
+        'top_p': 0.0,
+        'cfg_coef': 3.0,
+        'guidance_scale': 1.5,
+        'use_sampling': True,
+        'extend_stride': 5,
+        'gen_type': 'mixed',
+        'chunked': True,
+        'chunk_size': 128,
+        'record_tokens': True,
+        'record_window': 50,
+        'disable_offload': False,
+        'disable_cache_clear': False,
+        'disable_fp16': False,
+        'disable_sequential': False
+    }
+    
+    # Merge preset data with defaults
+    if preset_data:
+        for key, value in preset_data.items():
+            defaults[key] = value
+    
+    return defaults
+
 
 def output_messages(msg):
     gr.Info(msg)
@@ -286,10 +452,13 @@ def submit_lyrics(
     print(struct)
     
     # Set seed if provided
-    if set_seed(seed):
-        output_messages(f"Using seed: {seed}")
-    else:
-        output_messages(f"Processing lyrics... (random seed)")
+    used_seed = seed
+    if seed is None or seed < 0:
+        # Generate a random seed
+        used_seed = random.randint(0, 2147483647)
+    
+    set_seed(used_seed)
+    output_messages(f"Using seed: {used_seed}")
     
     # Format lyrics according to the model's expected format
     # The model expects: "[struct] lyrics ; [struct] lyrics"
@@ -412,6 +581,25 @@ def submit_lyrics(
     song_data["mp3"] = mp3_path
     song_data["video"] = video_path
     
+    # Save metadata
+    metadata = collect_current_parameters(
+        lyrics, genre, instrument, emotion, timbre, gender,
+        sample_prompt, audio_path, image_path, save_mp3, used_seed,  # Note: using used_seed instead of seed
+        max_gen_length, diffusion_steps, temperature, top_k, top_p,
+        cfg_coef, guidance_scale, use_sampling, extend_stride,
+        gen_type, chunked, chunk_size, record_tokens, record_window,
+        disable_offload, disable_cache_clear, disable_fp16, disable_sequential
+    )
+    metadata['timestamp'] = current_time
+    metadata['model'] = ckpt_path
+    metadata['output_files'] = {
+        'wav': wav_path,
+        'mp3': mp3_path,
+        'mp4': video_path
+    }
+    
+    save_metadata(wav_path, metadata)
+    
     history.append({"role": "user", "content": f"Generate a song with lyrics: {lyrics[:50]}..."})
     history.append({"role": "assistant", "content": f"Generated song successfully!", "song": song_data})
     
@@ -437,6 +625,26 @@ with gr.Blocks(title="LeVo Song Generation") as demo:
             
             # Character counter and duration display
             char_counter = gr.Markdown("0/1000 characters | Estimated duration: 0:00")
+            
+            # Preset controls
+            with gr.Accordion("Presets", open=True):
+                with gr.Row():
+                    preset_dropdown = gr.Dropdown(
+                        label="Select Preset",
+                        choices=get_preset_list(),
+                        value=None,
+                        interactive=True
+                    )
+                    load_preset_btn = gr.Button("Load Preset", variant="secondary")
+                    refresh_preset_btn = gr.Button("🔄", variant="secondary", scale=0)
+                
+                with gr.Row():
+                    preset_name_input = gr.Textbox(
+                        label="Preset Name",
+                        placeholder="Enter preset name to save...",
+                        scale=3
+                    )
+                    save_preset_btn = gr.Button("Save Preset", variant="secondary", scale=1)
             
             with gr.Row():
                 submit_btn = gr.Button("Generate Song", variant="primary")
@@ -751,6 +959,146 @@ with gr.Blocks(title="LeVo Song Generation") as demo:
     
     # Initialize character counter with default lyrics
     demo.load(fn=update_char_count_and_duration, inputs=[lyrics], outputs=[char_counter])
+    
+    # Preset functionality
+    def handle_save_preset(preset_name, *args):
+        """Save current settings as a preset"""
+        if not preset_name:
+            gr.Info("Please enter a preset name")
+            return gr.Dropdown(choices=get_preset_list())
+        
+        # Collect all parameters
+        param_values = list(args[:28])  # All UI parameters (increased to 28)
+        param_names = [
+            'lyrics', 'genre', 'instrument', 'emotion', 'timbre', 'gender',
+            'sample_prompt', 'audio_path', 'image_path', 'save_mp3', 'seed',
+            'max_gen_length', 'diffusion_steps', 'temperature', 'top_k', 'top_p',
+            'cfg_coef', 'guidance_scale', 'use_sampling', 'extend_stride',
+            'gen_type', 'chunked', 'chunk_size', 'record_tokens', 'record_window',
+            'disable_offload', 'disable_cache_clear', 'disable_fp16', 'disable_sequential'
+        ]
+        
+        preset_data = dict(zip(param_names, param_values))
+        success, message = save_preset(preset_name, preset_data)
+        
+        if success:
+            set_last_used_preset(preset_name)
+            gr.Info(message)
+            # Return updated dropdown with new preset selected
+            return gr.Dropdown(choices=get_preset_list(), value=preset_name)
+        else:
+            gr.Error(message)
+            return gr.Dropdown(choices=get_preset_list())
+    
+    def handle_load_preset(preset_name):
+        """Load a preset and update all UI components"""
+        if not preset_name:
+            return [gr.update()] * 28  # Updated to 28
+        
+        preset_data, message = load_preset(preset_name)
+        if preset_data is None:
+            gr.Error(message)
+            return [gr.update()] * 28  # Updated to 28
+        
+        # Apply preset data with defaults for missing values
+        values = apply_preset_to_ui(preset_data)
+        
+        # Update last used preset
+        set_last_used_preset(preset_name)
+        gr.Info(message)
+        
+        # Return updates for all UI components
+        return [
+            values['lyrics'],
+            values['genre'],
+            values['instrument'],
+            values['emotion'],
+            values['timbre'],
+            values['gender'],
+            values['sample_prompt'],
+            values['audio_path'],
+            values['image_path'],
+            values['save_mp3'],
+            values['seed'],
+            values['max_gen_length'],
+            values['diffusion_steps'],
+            values['temperature'],
+            values['top_k'],
+            values['top_p'],
+            values['cfg_coef'],
+            values['guidance_scale'],
+            values['use_sampling'],
+            values['extend_stride'],
+            values['gen_type'],
+            values['chunked'],
+            values['chunk_size'],
+            values['record_tokens'],
+            values['record_window'],
+            values['disable_offload'],
+            values['disable_cache_clear'],
+            values['disable_fp16'],
+            values['disable_sequential']
+        ]
+    
+    def handle_refresh_presets():
+        """Refresh the preset dropdown"""
+        return gr.Dropdown(choices=get_preset_list())
+    
+    # Connect preset handlers
+    all_inputs = [
+        lyrics, genre, instrument, emotion, timbre, gender,
+        sample_prompt, audio_path, image_upload, save_mp3_check, seed_input,
+        max_gen_length, diffusion_steps, temperature, top_k, top_p,
+        cfg_coef, guidance_scale, use_sampling, extend_stride,
+        gen_type, chunked, chunk_size, record_tokens, record_window,
+        disable_offload, disable_cache_clear, disable_fp16, disable_sequential
+    ]
+    
+    # Modified to return both dropdown and clear the input field
+    def handle_save_and_clear(preset_name, *args):
+        dropdown_update = handle_save_preset(preset_name, *args)
+        # Return updates for both dropdown and input field
+        return dropdown_update, gr.Textbox(value="")  # Clear the input field
+    
+    save_preset_btn.click(
+        fn=handle_save_and_clear,
+        inputs=[preset_name_input] + all_inputs,
+        outputs=[preset_dropdown, preset_name_input]
+    ).then(
+        # Automatically load the preset after saving
+        fn=handle_load_preset,
+        inputs=[preset_dropdown],
+        outputs=all_inputs
+    )
+    
+    load_preset_btn.click(
+        fn=handle_load_preset,
+        inputs=[preset_dropdown],
+        outputs=all_inputs
+    )
+    
+    refresh_preset_btn.click(
+        fn=handle_refresh_presets,
+        inputs=[],
+        outputs=[preset_dropdown]
+    )
+    
+    # Auto-load preset when dropdown selection changes
+    preset_dropdown.change(
+        fn=handle_load_preset,
+        inputs=[preset_dropdown],
+        outputs=all_inputs
+    )
+    
+    # Load last used preset on startup
+    def load_initial_preset():
+        """Load the last used preset on startup"""
+        last_preset = get_last_used_preset()
+        if last_preset and last_preset in get_preset_list():
+            return gr.Dropdown(value=last_preset)
+        return gr.Dropdown(value=None)
+    
+    demo.load(fn=load_initial_preset, inputs=[], outputs=[preset_dropdown])
     
     submit_btn.click(
         fn=submit_lyrics,
