@@ -20,41 +20,38 @@ sys.path.append(op.join(op.dirname(op.abspath(__file__)), 'tools', 'gradio'))
 from levo_inference_lowmem import LeVoInference
 
 EXAMPLE_LYRICS = """
-[intro-short]
+[intro-medium]
 
 [verse]
-Digital sunrise, SECourses on my screen
-Breaking down AI, making complex simple and clean
-From neural networks to the latest GPT
-Tech education flowing free
+So close, no matter how far
+Couldn't be much more from the heart
+Forever trusting who we are
+And nothing else matters
+
+[verse]
+Never opened myself this way
+Life is ours, we live it our way
+All these words, I don't just say
+And nothing else matters
 
 [chorus]
-SECourses lighting up the way
-Where AI meets tomorrow, today
-Every video, every guide
-Taking us on a knowledge ride
-
-[inst-short]
-
-[verse]
-Machine learning mysteries unfold
-Tutorials worth their weight in gold
-From beginner basics to advanced design
-Evolution of tech, line by line
+Trust I seek and I find in you
+Every day for us something new
+Open mind for a different view
+And nothing else matters
 
 [bridge]
-When the future seems unclear
-SECourses makes it crystal clear
-Building bridges byte by byte
-Innovation shining bright
+Never cared for what they do
+Never cared for what they know
+But I know
 
-[chorus]
-SECourses lighting up the way
-Where AI meets tomorrow, today
-Every video, every guide
-Taking us on a knowledge ride
+[verse]
+So close, no matter how far
+It couldn't be much more from the heart
+Forever trusting who we are
+And nothing else matters
 
-[outro-short]
+[outro-long]
 """.strip()
 
 APP_DIR = op.dirname(op.abspath(__file__))
@@ -105,7 +102,7 @@ def get_next_file_number(output_dir):
         os.makedirs(output_dir)
         return 1
     
-    existing_files = [f for f in os.listdir(output_dir) if f.endswith('.wav')]
+    existing_files = [f for f in os.listdir(output_dir) if f.endswith(('.wav', '.mp3', '.mp4'))]
     if not existing_files:
         return 1
     
@@ -272,6 +269,7 @@ def set_seed(seed):
 def submit_lyrics(
     lyrics, struct, genre, instrument, emotion, timbre, gender,
     sample_prompt, audio_path, image_path, save_mp3, seed,
+    disable_offload, disable_cache_clear, disable_fp16, disable_sequential,
     history, session
 ):
     # Limit lyrics length to prevent exceeding token limit
@@ -340,7 +338,11 @@ def submit_lyrics(
         None,  # genre parameter (None since we're using description)
         op.join(APP_DIR, "ckpt/prompt.pt"),  # auto_prompt_path
         "mixed",  # gen_type
-        {}  # params
+        {},  # params
+        disable_offload=disable_offload,
+        disable_cache_clear=disable_cache_clear,
+        disable_fp16=disable_fp16,
+        disable_sequential=disable_sequential
     ).cpu().permute(1, 0).float().numpy()
     
     # Save the audio with sequential numbering
@@ -450,13 +452,24 @@ with gr.Blocks(title="LeVo Song Generation") as demo:
                     value="male"
                 )
             
-            sample_prompt = gr.Checkbox(label="Use Sample Prompt", value=False)
-            audio_path = gr.Audio(label="Reference Audio (optional)", type="filepath")
-            
             with gr.Row():
-                save_mp3_check = gr.Checkbox(label="Also save as MP3 (192 kbps)", value=False)
+                save_mp3_check = gr.Checkbox(label="Also save as MP3 (192 kbps)", value=True)
                 seed_input = gr.Number(label="Seed (for reproducibility)", value=-1, precision=0, 
                                      info="Use -1 for random, or any positive number for reproducible results")
+            
+            # VRAM optimization controls
+            with gr.Accordion("VRAM Optimization Settings", open=False):
+                gr.Markdown("Disable these optimizations for faster generation on high-VRAM GPUs (24 GB GPUs can disable all)")
+                with gr.Row():
+                    disable_offload = gr.Checkbox(label="Disable Model Offloading", value=False, 
+                                                info="Keep models in VRAM instead of offloading to CPU")
+                    disable_cache_clear = gr.Checkbox(label="Disable Cache Clearing", value=False,
+                                                    info="Don't clear CUDA cache between steps")
+                with gr.Row():
+                    disable_fp16 = gr.Checkbox(label="Disable Float16 Autocast", value=False,
+                                             info="Disable automatic mixed precision (may cause errors)")
+                    disable_sequential = gr.Checkbox(label="Disable Sequential Loading", value=False,
+                                                   info="Keep all models in memory simultaneously")
             
             with gr.Row():
                 image_upload = gr.Image(label="Image for Video (optional)", type="filepath")
@@ -466,6 +479,11 @@ with gr.Blocks(title="LeVo Song Generation") as demo:
                 - Video will use the uploaded image with generated audio
                 - Video encoded with H.264, CRF 17
                 """)
+            
+            # Reference audio section
+            with gr.Accordion("Reference Audio (Advanced)", open=False):
+                sample_prompt = gr.Checkbox(label="Use Sample Prompt", value=False)
+                audio_path = gr.Audio(label="Reference Audio (optional)", type="filepath")
             
         
         with gr.Column(scale=1):
@@ -568,6 +586,7 @@ with gr.Blocks(title="LeVo Song Generation") as demo:
         inputs=[
             lyrics, struct, genre, instrument, emotion, timbre, gender,
             sample_prompt, audio_path, image_upload, save_mp3_check, seed_input,
+            disable_offload, disable_cache_clear, disable_fp16, disable_sequential,
             history, session
         ],
         outputs=[output_audio, output_video, history, history_display]

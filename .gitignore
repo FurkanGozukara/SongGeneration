@@ -6,3 +6,4 @@ venv
 ckpt/
 output/
 third_party/
+.claude

@@ -48,7 +48,8 @@ class LeVoInference(torch.nn.Module):
         )
 
 
-    def forward(self, lyric: str, description: str = None, prompt_audio_path: os.PathLike = None, genre: str = None, auto_prompt_path: os.PathLike = None, gen_type: str = "mixed", params = dict()):
+    def forward(self, lyric: str, description: str = None, prompt_audio_path: os.PathLike = None, genre: str = None, auto_prompt_path: os.PathLike = None, gen_type: str = "mixed", params = dict(), 
+                disable_offload=False, disable_cache_clear=False, disable_fp16=False, disable_sequential=False):
         if prompt_audio_path is not None and os.path.exists(prompt_audio_path):
             separator = Separator()
             audio_tokenizer = builders.get_audio_tokenizer_model(self.cfg.audio_tokenizer_checkpoint, self.cfg)
@@ -61,7 +62,8 @@ class LeVoInference(torch.nn.Module):
                 pmt_wav, _ = audio_tokenizer.encode(pmt_wav)
             del audio_tokenizer
             del separator
-            torch.cuda.empty_cache()
+            if not disable_cache_clear:
+                torch.cuda.empty_cache()
 
             seperate_tokenizer = builders.get_audio_tokenizer_model(self.cfg.audio_tokenizer_checkpoint_sep, self.cfg)
             seperate_tokenizer = seperate_tokenizer.eval().cuda()
@@ -69,7 +71,8 @@ class LeVoInference(torch.nn.Module):
                 vocal_wav, bgm_wav = seperate_tokenizer.encode(vocal_wav, bgm_wav)
             del seperate_tokenizer
             melody_is_wav = False
-            torch.cuda.empty_cache()
+            if not disable_cache_clear:
+                torch.cuda.empty_cache()
         elif genre is not None and auto_prompt_path is not None:
             auto_prompt = torch.load(auto_prompt_path)
             merge_prompt = [item for sublist in auto_prompt.values() for item in sublist]
@@ -93,7 +96,7 @@ class LeVoInference(torch.nn.Module):
         audiolm.load_state_dict(audiolm_state_dict, strict=False)
         audiolm = audiolm.eval()
 
-        offload_audiolm = True if 'offload' in self.cfg.keys() and 'audiolm' in self.cfg.offload else False
+        offload_audiolm = False if disable_offload else (True if 'offload' in self.cfg.keys() and 'audiolm' in self.cfg.offload else False)
         if offload_audiolm:
             audiolm_offload_param = OffloadParamParse.parse_config(audiolm, self.cfg.offload.audiolm)
             audiolm_offload_param.show()
@@ -101,6 +104,7 @@ class LeVoInference(torch.nn.Module):
             offload_profiler.offload_layer(**(audiolm_offload_param.offload_layer_param_dict()))
             offload_profiler.clean_cache_wrapper(**(audiolm_offload_param.clean_cache_param_dict()))
         else:
+            # Always use float16 for the model to maintain compatibility
             audiolm = audiolm.cuda().to(torch.float16)
 
         model = CodecLM(name = "tmp",
@@ -121,29 +125,42 @@ class LeVoInference(torch.nn.Module):
             'melody_is_wav': melody_is_wav,
         }
 
-        with torch.autocast(device_type="cuda", dtype=torch.float16):
+        if disable_fp16:
             with torch.no_grad():
                 tokens = model.generate(**generate_inp, return_tokens=True)
                 if offload_audiolm:
                     offload_profiler.reset_empty_cache_mem_line()
-        offload_profiler.stop()
-        del offload_profiler
-        del audiolm_offload_param
+        else:
+            with torch.autocast(device_type="cuda", dtype=torch.float16):
+                with torch.no_grad():
+                    tokens = model.generate(**generate_inp, return_tokens=True)
+                    if offload_audiolm:
+                        offload_profiler.reset_empty_cache_mem_line()
+        
+        if offload_audiolm:
+            offload_profiler.stop()
+            del offload_profiler
+            del audiolm_offload_param
         del model
-        audiolm = audiolm.cpu()
-        del audiolm
-        del checkpoint
-        gc.collect()
-        torch.cuda.empty_cache()
+        if not disable_sequential:
+            audiolm = audiolm.cpu()
+            del audiolm
+            del checkpoint
+            gc.collect()
+            if not disable_cache_clear:
+                torch.cuda.empty_cache()
 
-        seperate_tokenizer = builders.get_audio_tokenizer_model_cpu(self.cfg.audio_tokenizer_checkpoint_sep, self.cfg)
+        if disable_sequential:
+            seperate_tokenizer = builders.get_audio_tokenizer_model(self.cfg.audio_tokenizer_checkpoint_sep, self.cfg)
+        else:
+            seperate_tokenizer = builders.get_audio_tokenizer_model_cpu(self.cfg.audio_tokenizer_checkpoint_sep, self.cfg)
         device = "cuda:0"
         seperate_tokenizer.model.device = device
         seperate_tokenizer.model.vae = seperate_tokenizer.model.vae.to(device)
         seperate_tokenizer.model.model.device = torch.device(device)
         seperate_tokenizer = seperate_tokenizer.eval()
 
-        offload_wav_tokenizer_diffusion =  True if 'offload' in self.cfg.keys() and 'wav_tokenizer_diffusion' in self.cfg.offload else False
+        offload_wav_tokenizer_diffusion = False if disable_offload else (True if 'offload' in self.cfg.keys() and 'wav_tokenizer_diffusion' in self.cfg.offload else False)
         if offload_wav_tokenizer_diffusion:
             sep_offload_param = OffloadParamParse.parse_config(seperate_tokenizer, self.cfg.offload.wav_tokenizer_diffusion)
             sep_offload_param.show()
@@ -169,6 +186,7 @@ class LeVoInference(torch.nn.Module):
         if offload_wav_tokenizer_diffusion:
             sep_offload_profiler.reset_empty_cache_mem_line()
             sep_offload_profiler.stop()
-        torch.cuda.empty_cache()
+        if not disable_cache_clear:
+            torch.cuda.empty_cache()
 
         return wav_seperate[0]
