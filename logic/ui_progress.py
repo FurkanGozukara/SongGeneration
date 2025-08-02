@@ -14,6 +14,9 @@ class GradioProgressTracker:
         self.batch_info = ""
         self.preset_info = ""
         self.generation_info = ""
+        self.diffusion_progress = ""
+        self.token_progress = ""
+        self.detailed_status = ""
         
     def start(self, total_steps=100):
         """Start tracking progress"""
@@ -35,6 +38,12 @@ class GradioProgressTracker:
             self.preset_info = progress_info['preset_info']
         if 'generation_info' in progress_info:
             self.generation_info = progress_info['generation_info']
+        if 'diffusion_progress' in progress_info:
+            self.diffusion_progress = progress_info['diffusion_progress']
+        if 'token_progress' in progress_info:
+            self.token_progress = progress_info['token_progress']
+        if 'detailed_status' in progress_info:
+            self.detailed_status = progress_info['detailed_status']
             
     def get_progress_text(self) -> str:
         """Get formatted progress text for display"""
@@ -54,10 +63,20 @@ class GradioProgressTracker:
         if self.generation_info:
             parts.append(f"Generation: {self.generation_info}")
             
+        # Detailed progress bars
+        if self.diffusion_progress:
+            parts.append(f"Diffusion: {self.diffusion_progress}")
+        if self.token_progress:
+            parts.append(f"Tokens: {self.token_progress}")
+            
         # Time elapsed
         if self.start_time:
             elapsed = time.time() - self.start_time
             parts.append(f"Time: {elapsed:.1f}s")
+            
+        # Add detailed status if available
+        if self.detailed_status:
+            return f"{' | '.join(parts)}\n{self.detailed_status}"
             
         return " | ".join(parts) if parts else "Processing..."
         
@@ -98,3 +117,15 @@ def format_eta(seconds: float) -> str:
         hours = int(seconds // 3600)
         minutes = int((seconds % 3600) // 60)
         return f"{hours}h {minutes}m"
+
+def create_progress_bar(current: int, total: int, width: int = 50) -> str:
+    """Create a text-based progress bar"""
+    if total <= 0:
+        return ""
+    
+    progress = min(current / total, 1.0)
+    filled_width = int(width * progress)
+    bar = "█" * filled_width + "▒" * (width - filled_width)
+    percentage = int(progress * 100)
+    
+    return f"{percentage:3d}%|{bar}| {current}/{total}"

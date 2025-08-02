@@ -126,3 +126,25 @@ def load_presets_from_folder(preset_dir: str) -> Dict[str, Dict[str, Any]]:
                 print(f"Error loading preset {preset_name}: {e}")
     
     return presets
+
+def find_matching_image(txt_path: str) -> Optional[str]:
+    """Find an image file that matches the txt file (case-insensitive)"""
+    base_dir = os.path.dirname(txt_path)
+    base_name = os.path.splitext(os.path.basename(txt_path))[0]
+    
+    # Image extensions to check (case-insensitive)
+    image_extensions = ['.png', '.jpg', '.jpeg', '.webp']
+    
+    # Check all files in the directory
+    try:
+        for file in os.listdir(base_dir):
+            file_base = os.path.splitext(file)[0]
+            file_ext = os.path.splitext(file)[1]
+            
+            # Case-insensitive comparison
+            if file_base.lower() == base_name.lower() and file_ext.lower() in image_extensions:
+                return os.path.join(base_dir, file)
+    except Exception as e:
+        print(f"Error searching for matching image: {e}")
+    
+    return None

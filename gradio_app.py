@@ -268,7 +268,7 @@ def run_batch_processing(
     def batch_progress_callback(info):
         progress_msg = []
         if info.get('batch_info'):
-            progress_msg.append(f"Batch: {info['batch_info']}")
+            progress_msg.append(f"File: {info['batch_info']}")
         if info.get('preset_info'):
             progress_msg.append(f"Preset: {info['preset_info']}")
         if info.get('generation_info'):
@@ -278,7 +278,21 @@ def run_batch_processing(
         if info.get('eta') and info['eta'] > 0:
             progress_msg.append(f"ETA: {format_eta(info['eta'])}")
         
+        # Add detailed progress information
+        detailed_progress = []
+        if info.get('phase'):
+            detailed_progress.append(f"Phase: {info['phase']}")
+        if info.get('diffusion_progress'):
+            detailed_progress.append(f"Diffusion: {info['diffusion_progress']}")
+        if info.get('current_step') and info.get('total_steps'):
+            from logic.ui_progress import create_progress_bar
+            progress_bar = create_progress_bar(info['current_step'], info['total_steps'], width=30)
+            detailed_progress.append(progress_bar)
+        
         status_text = " | ".join(progress_msg)
+        if detailed_progress:
+            status_text += "\n" + " | ".join(detailed_progress)
+            
         progress(info.get('progress', 0), desc=status_text)
         
         # Update batch status
@@ -325,6 +339,9 @@ def submit_lyrics(
 ):
     # Reset cancellation token
     cancellation_token.reset()
+    
+    # Show cancel button and progress immediately
+    yield None, None, history, process_history(history), gr.update(visible=True), gr.update(visible=True)
     
     # Create progress callback
     progress_callback = create_progress_callback(gradio_progress_tracker, progress)
@@ -449,9 +466,6 @@ def submit_lyrics(
         yield None, None, history, process_history(history), gr.update(visible=False), gr.update(visible=False)
         return
     
-    # Show cancel button and progress
-    yield None, None, history, process_history(history), gr.update(visible=True), gr.update(visible=True)
-    
     # Load all presets if loop_presets is enabled
     presets_to_use = [None]  # None means use current settings
     if loop_presets:
@@ -497,9 +511,15 @@ def submit_lyrics(
             # Update progress for multiple generations
             progress_desc = f"Generating {generation_count}/{total_generations}"
             if preset_name:
-                progress_desc += f" | Preset: {preset_name}"
+                progress_desc += f" | Preset: {preset_name} ({preset_idx + 1}/{len(presets_to_use)})"
             if num_generations > 1:
                 progress_desc += f" | Generation {gen_idx + 1}/{num_generations}"
+            
+            # Add progress bar visualization
+            from logic.ui_progress import create_progress_bar
+            progress_bar = create_progress_bar(generation_count, total_generations, width=30)
+            progress_desc += f"\n{progress_bar}"
+            
             progress((generation_count / total_generations), desc=progress_desc)
         
             # Generate new seed for each iteration after the first

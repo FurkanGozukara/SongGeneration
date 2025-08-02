@@ -8,7 +8,7 @@ from .generation import generate_single_song, CancellationToken, ProgressTracker
 from .file_utils import (
     save_metadata, convert_wav_to_mp3, create_video_from_image_and_audio,
     scan_folder_for_txt_files, read_prompt_from_txt, check_if_output_exists,
-    load_presets_from_folder
+    load_presets_from_folder, find_matching_image
 )
 
 class BatchProcessor:
@@ -99,6 +99,11 @@ class BatchProcessor:
             
             base_name = os.path.splitext(os.path.basename(txt_file))[0]
             
+            # Check for matching image file
+            matching_image = find_matching_image(txt_file)
+            if matching_image:
+                print(f"Found matching image for {base_name}: {os.path.basename(matching_image)}")
+            
             # Preset loop
             preset_names = list(presets.keys())
             for preset_idx, preset_name in enumerate(preset_names):
@@ -112,6 +117,10 @@ class BatchProcessor:
                 
                 preset_params = presets[preset_name].copy()
                 preset_params['lyrics'] = lyrics  # Override lyrics with txt content
+                
+                # Use matching image if found and no image specified in preset or params
+                if matching_image and not preset_params.get('image_path'):
+                    preset_params['image_path'] = matching_image
                 
                 # Generation loop
                 for gen_idx in range(num_generations):
