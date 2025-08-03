@@ -118,10 +118,27 @@ def get_next_file_number(output_dir):
     numbers = []
     for f in existing_files:
         try:
-            num = int(f.split('.')[0])
+            # Remove extension first
+            name_without_ext = f.rsplit('.', 1)[0]
+            
+            # Try to extract number from the beginning of the filename
+            # Handle cases like "0018_The 80s Synth-Pop Throwback" or "0018"
+            if '_' in name_without_ext:
+                # Split by underscore and try to parse the first part
+                first_part = name_without_ext.split('_')[0]
+                num = int(first_part)
+            else:
+                # Try to parse the whole name as a number
+                num = int(name_without_ext)
+            
             numbers.append(num)
         except:
             continue
+    
+    # Debug output
+    if numbers:
+        print(f"Found file numbers: {sorted(set(numbers))}")
+        print(f"Next file number will be: {max(numbers) + 1}")
     
     return max(numbers) + 1 if numbers else 1
 
