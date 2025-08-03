@@ -698,8 +698,8 @@ with gr.Blocks(title="SECourses LeVo Song Generation App V1",theme=gr.themes.Sof
             
                     # Generate and Open Folder buttons at the top
                     with gr.Row():
-                        submit_btn = gr.Button("Generate Song", variant="primary")
-                        open_folder_btn = gr.Button("Open Output Folder", variant="secondary")
+                        submit_btn = gr.Button("🎵 Generate Song", variant="primary")
+                        open_folder_btn = gr.Button("📁 Open Output Folder", variant="secondary")
             
                     # Preset controls
                     with gr.Accordion("Presets", open=True):
@@ -710,7 +710,7 @@ with gr.Blocks(title="SECourses LeVo Song Generation App V1",theme=gr.themes.Sof
                                 value=None,
                                 interactive=True
                             )
-                            load_preset_btn = gr.Button("Load Preset", variant="secondary")
+                            load_preset_btn = gr.Button("📂 Load Preset", variant="secondary")
                             refresh_preset_btn = gr.Button("🔄", variant="secondary", scale=0)
                         
                         with gr.Row():
@@ -719,7 +719,7 @@ with gr.Blocks(title="SECourses LeVo Song Generation App V1",theme=gr.themes.Sof
                                 placeholder="Enter preset name to save...",
                                 scale=3
                             )
-                            save_preset_btn = gr.Button("Save Preset", variant="secondary", scale=1)
+                            save_preset_btn = gr.Button("💾 Save Preset", variant="secondary", scale=1)
                         
                         with gr.Row():
                             loop_presets = gr.Checkbox(
@@ -1007,7 +1007,7 @@ with gr.Blocks(title="SECourses LeVo Song Generation App V1",theme=gr.themes.Sof
                             info="Skip generation if output files already exist"
                         )
                     with gr.Row():
-                        batch_process_btn = gr.Button("Start Batch Processing", variant="primary")
+                        batch_process_btn = gr.Button("🚀 Start Batch Processing", variant="primary")
                     
                     # Batch status display
                     batch_status = gr.Markdown("", visible=False)
