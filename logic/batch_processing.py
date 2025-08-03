@@ -65,11 +65,15 @@ class BatchProcessor:
             return results
         
         # Load presets if needed
-        presets = {'default': base_params}
+        presets = {'Default': base_params}
         if loop_presets and preset_dir:
             loaded_presets = load_presets_from_folder(preset_dir)
             if loaded_presets:
+                # When looping presets, use only the loaded presets
                 presets = loaded_presets
+                # Add Default preset to the beginning if not already present
+                if 'Default' not in presets:
+                    presets = {'Default': base_params, **presets}
         
         # Calculate total operations
         total_operations = len(txt_files) * len(presets) * num_generations
@@ -116,7 +120,16 @@ class BatchProcessor:
                     self.progress_tracker.set_preset_info(preset_idx + 1, len(presets))
                 
                 preset_params = presets[preset_name].copy()
-                preset_params['lyrics'] = lyrics  # Override lyrics with txt content
+                # Always use lyrics from txt file, ignoring preset lyrics
+                preset_params['lyrics'] = lyrics
+                
+                # Debug: Print preset parameters being used
+                print(f"\nUsing preset: {preset_name}")
+                print(f"  Genre: {preset_params.get('genre', 'N/A')}")
+                print(f"  Instrument: {preset_params.get('instrument', 'N/A')}")
+                print(f"  Emotion: {preset_params.get('emotion', 'N/A')}")
+                print(f"  Timbre: {preset_params.get('timbre', 'N/A')}")
+                print(f"  Gender: {preset_params.get('gender', 'N/A')}")
                 
                 # Use matching image if found and no image specified in preset or params
                 if matching_image and not preset_params.get('image_path'):
@@ -213,6 +226,7 @@ class BatchProcessor:
         os.makedirs(output_folder, exist_ok=True)
         wav_path = os.path.join(output_folder, f"{base_name}.wav")
         wavfile.write(wav_path, self.model_cfg.sample_rate, generation_result['audio_data'])
+        print(f"Generated audio saved to: {wav_path}")
         
         result = {
             'wav': wav_path,
@@ -226,6 +240,7 @@ class BatchProcessor:
             mp3_path = os.path.join(output_folder, f"{base_name}.mp3")
             if convert_wav_to_mp3(wav_path, mp3_path):
                 result['mp3'] = mp3_path
+                print(f"Generated MP3 saved to: {mp3_path}")
         
         # Create video if image provided
         if params.get('image_path'):

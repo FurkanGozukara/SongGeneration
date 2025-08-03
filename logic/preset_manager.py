@@ -71,6 +71,9 @@ class PresetManager:
         result = defaults.copy()
         if preset_data:
             for key, value in preset_data.items():
+                # Skip empty lyrics to preserve current lyrics
+                if key == 'lyrics' and value == '':
+                    continue
                 result[key] = value
         return result
 

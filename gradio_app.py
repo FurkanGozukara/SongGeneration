@@ -484,6 +484,12 @@ def submit_lyrics(
     total_generations = len(presets_to_use) * num_generations
     generation_count = 0
     
+    # Get the starting file number once
+    output_dir = op.join(APP_DIR, "output")
+    os.makedirs(output_dir, exist_ok=True)
+    starting_file_number = get_next_file_number(output_dir)
+    file_counter = 0
+    
     # Preset loop (outer loop)
     for preset_idx, preset_name in enumerate(presets_to_use):
         # Load preset if specified
@@ -498,6 +504,12 @@ def submit_lyrics(
                 emotion = preset_data.get('emotion', emotion)
                 timbre = preset_data.get('timbre', timbre)
                 gender = preset_data.get('gender', gender)
+                # Update current_* variables used for generation
+                current_genre = genre
+                current_instrument = instrument
+                current_emotion = emotion
+                current_timbre = timbre
+                current_gender = gender
                 # Also get preset's randomize setting
                 randomize_params = preset_data.get('randomize_params', randomize_params)
             else:
@@ -540,8 +552,11 @@ def submit_lyrics(
                 current_gender = random.choice(GENDERS)
                 output_messages(f"Randomized: {current_genre}, {current_instrument}, {current_emotion}, {current_timbre}, {current_gender}")
             
-            # Re-run generation for subsequent iterations
-            if gen_idx > 0:
+            # Generate audio for each preset/generation (skip only the very first if no presets)
+            # If we're using presets, always generate. If not using presets, skip first generation.
+            should_generate = preset_name is not None or gen_idx > 0
+            
+            if should_generate:
                 try:
                     with intercept_progress(progress_callback):
                         audio_data = MODEL(
@@ -570,19 +585,19 @@ def submit_lyrics(
                     continue
             
                 # Save the audio with sequential numbering
-            output_dir = op.join(APP_DIR, "output")
-            os.makedirs(output_dir, exist_ok=True)
+            # Calculate the current file number
+            current_file_number = starting_file_number + file_counter
+            file_counter += 1
             
-            file_number = get_next_file_number(output_dir)
             # Construct filename based on preset and generation
             if preset_name and num_generations > 1:
-                base_filename = f"{file_number:04d}_{preset_name}_gen{gen_idx+1:03d}"
+                base_filename = f"{current_file_number:04d}_{preset_name}_gen{gen_idx+1:03d}"
             elif preset_name:
-                base_filename = f"{file_number:04d}_{preset_name}"
+                base_filename = f"{current_file_number:04d}_{preset_name}"
             elif num_generations > 1:
-                base_filename = f"{file_number:04d}_gen{gen_idx+1:03d}"
+                base_filename = f"{current_file_number:04d}_gen{gen_idx+1:03d}"
             else:
-                base_filename = f"{file_number:04d}"
+                base_filename = f"{current_file_number:04d}"
             
             wav_path = op.join(output_dir, f"{base_filename}.wav")
             wavfile.write(wav_path, MODEL.cfg.sample_rate, audio_data)
@@ -1203,7 +1218,7 @@ with gr.Blocks(title="SECourses LeVo Song Generation App V1",theme=gr.themes.Sof
             gr.Error(message)
             return gr.Dropdown(choices=preset_manager.get_preset_list())
     
-    def handle_load_preset(preset_name):
+    def handle_load_preset(preset_name, current_lyrics):
         """Load a preset and update all UI components"""
         if not preset_name:
             return [gr.update()] * 32  # Updated to 32 for all parameters
@@ -1216,9 +1231,9 @@ with gr.Blocks(title="SECourses LeVo Song Generation App V1",theme=gr.themes.Sof
         # Debug: print loaded values
         print(f"Loading preset '{preset_name}' with loop_presets={preset_data.get('loop_presets')}, randomize_params={preset_data.get('randomize_params')}")
         
-        # Default values matching UI defaults
+        # Default values matching UI defaults - use current lyrics as default
         defaults = {
-            'lyrics': EXAMPLE_LYRICS,
+            'lyrics': current_lyrics if current_lyrics else EXAMPLE_LYRICS,
             'genre': 'electronic',
             'instrument': 'synthesizer and drums',
             'emotion': 'uplifting',
@@ -1322,13 +1337,13 @@ with gr.Blocks(title="SECourses LeVo Song Generation App V1",theme=gr.themes.Sof
     ).then(
         # Automatically load the preset after saving
         fn=handle_load_preset,
-        inputs=[preset_dropdown],
+        inputs=[preset_dropdown, lyrics],
         outputs=all_inputs
     )
     
     load_preset_btn.click(
         fn=handle_load_preset,
-        inputs=[preset_dropdown],
+        inputs=[preset_dropdown, lyrics],
         outputs=all_inputs
     )
     
@@ -1341,7 +1356,7 @@ with gr.Blocks(title="SECourses LeVo Song Generation App V1",theme=gr.themes.Sof
     # Auto-load preset when dropdown selection changes
     preset_dropdown.change(
         fn=handle_load_preset,
-        inputs=[preset_dropdown],
+        inputs=[preset_dropdown, lyrics],
         outputs=all_inputs
     )
     
