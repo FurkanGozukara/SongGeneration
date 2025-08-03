@@ -362,6 +362,7 @@ def submit_lyrics(
         lyrics = lyrics[:MAX_CHARS]
         output_messages(f"Lyrics truncated to {MAX_CHARS} characters to fit token limit")
     
+    print(f"[DEBUG] Received lyrics: '{lyrics[:100]}...' (length: {len(lyrics)} characters)")
     print(f"Lyrics length: {len(lyrics)} characters")
     print(struct)
     
