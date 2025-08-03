@@ -356,8 +356,8 @@ def submit_lyrics(
     progress_callback = create_progress_callback(gradio_progress_tracker, progress)
     
     # Limit lyrics length to prevent exceeding token limit
-    # Approximate: ~6.5 characters per token, max 300 tokens, safe limit = 1000 characters
-    MAX_CHARS = 1000
+    # Approximate: ~6.5 characters per token, max 300 tokens, safe limit = 1100 characters
+    MAX_CHARS = 1100
     if len(lyrics) > MAX_CHARS:
         lyrics = lyrics[:MAX_CHARS]
         output_messages(f"Lyrics truncated to {MAX_CHARS} characters to fit token limit")
@@ -504,6 +504,9 @@ def submit_lyrics(
     total_generations = len(presets_to_use) * num_generations
     generation_count = 0
     
+    # Debug randomization setting
+    print(f"[DEBUG] randomize_params={randomize_params}, num_generations={num_generations}")
+    
     # Get the starting file number once
     output_dir = op.join(APP_DIR, "output")
     os.makedirs(output_dir, exist_ok=True)
@@ -556,6 +559,14 @@ def submit_lyrics(
             else:
                 output_messages(f"Failed to load preset {preset_name}, skipping")
                 continue
+        
+        # Initialize current_* variables before the loop
+        if not preset_name:  # Only if we're not in preset loop mode
+            current_genre = genre
+            current_instrument = instrument
+            current_emotion = emotion
+            current_timbre = timbre
+            current_gender = gender
         
         # Generation loop (inner loop)
         for gen_idx in range(num_generations):
@@ -757,11 +768,11 @@ with gr.Blocks(title="SECourses LeVo Song Generation App",theme=gr.themes.Soft()
                         value=EXAMPLE_LYRICS,
                         lines=15,
                         max_lines=20,
-                        info="Maximum 1000 characters to stay within token limit"
+                        info="Maximum 1100 characters to stay within token limit"
                     )
                     
                     # Character counter and duration display
-                    char_counter = gr.Markdown("0/1000 characters | Estimated duration: 0:00")
+                    char_counter = gr.Markdown("0/1100 characters | Estimated duration: 0:00")
             
                     # Generate and Open Folder buttons at the top
                     with gr.Row():
@@ -1206,12 +1217,12 @@ with gr.Blocks(title="SECourses LeVo Song Generation App",theme=gr.themes.Soft()
             duration_str = " | Estimated duration: 0:00"
         
         # Character count warning
-        if char_count > 1000:
-            return f"⚠️ {char_count}/1000 characters (will be truncated){duration_str}"
-        elif char_count > 900:
-            return f"⚠️ {char_count}/1000 characters{duration_str}"
+        if char_count > 1100:
+            return f"⚠️ {char_count}/1100 characters (will be truncated){duration_str}"
+        elif char_count > 1000:
+            return f"⚠️ {char_count}/1100 characters{duration_str}"
         else:
-            return f"{char_count}/1000 characters{duration_str}"
+            return f"{char_count}/1100 characters{duration_str}"
     
     lyrics.change(fn=update_char_count_and_duration, inputs=[lyrics], outputs=[char_counter])
     
