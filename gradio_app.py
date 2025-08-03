@@ -17,6 +17,9 @@ import random
 import argparse
 import threading
 
+# Import and configure output suppression
+from utils.suppress_output import suppress_output, disable_verbose_logging
+
 # Add the tools/gradio directory to the path
 sys.path.append(op.join(op.dirname(op.abspath(__file__)), 'tools', 'gradio'))
 from levo_inference_lowmem import LeVoInference
@@ -62,7 +65,12 @@ pythonpath_additions = [
 current_pythonpath = os.environ.get('PYTHONPATH', '')
 os.environ['PYTHONPATH'] = ';'.join(pythonpath_additions) + (';' + current_pythonpath if current_pythonpath else '')
 
-MODEL = LeVoInference(ckpt_path)
+# Disable verbose logging before initializing model
+disable_verbose_logging()
+
+# Initialize model with output suppression
+with suppress_output():
+    MODEL = LeVoInference(ckpt_path)
 
 # Global cancellation token and batch processor
 cancellation_token = CancellationToken()

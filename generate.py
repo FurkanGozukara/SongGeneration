@@ -14,6 +14,7 @@ import gc
 from codeclm.trainer.codec_song_pl import CodecLM_PL
 from codeclm.models import CodecLM
 from third_party.demucs.models.pretrained import get_model_from_yaml
+from utils.suppress_output import suppress_output, disable_verbose_logging
 
 
 auto_prompt_type = ['Pop', 'R&B', 'Dance', 'Jazz', 'Folk', 'Rock', 'Chinese Style', 'Chinese Tradition', 'Metal', 'Reggae', 'Chinese Opera', 'Auto']
@@ -78,9 +79,13 @@ def parse_args():
                       help='Whether to use flash attention (default: False)')
     parser.add_argument('--low_mem', action='store_true',
                       help='Whether to use low memory mode (default: False)')
+    parser.add_argument('--quiet', action='store_true',
+                      help='Suppress verbose output during generation (default: False)')
     return parser.parse_args()
 
 def generate(args):
+    from codeclm.utils.offload_profiler import OffloadProfiler, OffloadParamParse
+    
     ckpt_path = args.ckpt_path
     input_jsonl = args.input_jsonl
     save_dir = args.save_dir
@@ -94,10 +99,11 @@ def generate(args):
     gen_type = args.generate_type
     
 
-    separator = Separator()
-    auto_prompt = torch.load('ckpt/prompt.pt')
-    audio_tokenizer = builders.get_audio_tokenizer_model(cfg.audio_tokenizer_checkpoint, cfg)
-    audio_tokenizer = audio_tokenizer.eval().cuda()
+    with suppress_output():
+        separator = Separator()
+        auto_prompt = torch.load('ckpt/prompt.pt')
+        audio_tokenizer = builders.get_audio_tokenizer_model(cfg.audio_tokenizer_checkpoint, cfg)
+        audio_tokenizer = audio_tokenizer.eval().cuda()
     merge_prompt = [item for sublist in auto_prompt.values() for item in sublist]
     with open(input_jsonl, "r") as fp:
         lines = fp.readlines()
@@ -301,10 +307,12 @@ def generate_lowmem(args):
             use_audio_tokenizer = True
             break
     if use_audio_tokenizer:
-        separator = Separator()
-        audio_tokenizer = builders.get_audio_tokenizer_model(cfg.audio_tokenizer_checkpoint, cfg)
-        audio_tokenizer = audio_tokenizer.eval().cuda()
-    auto_prompt = torch.load('ckpt/prompt.pt')
+        with suppress_output():
+            separator = Separator()
+            audio_tokenizer = builders.get_audio_tokenizer_model(cfg.audio_tokenizer_checkpoint, cfg)
+            audio_tokenizer = audio_tokenizer.eval().cuda()
+    with suppress_output():
+        auto_prompt = torch.load('ckpt/prompt.pt')
     merge_prompt = [item for sublist in auto_prompt.values() for item in sublist]
     new_items = []
     for line in lines:
@@ -393,19 +401,21 @@ def generate_lowmem(args):
     torch.cuda.empty_cache()
 
     # Define model or load pretrained model
-    audiolm = builders.get_lm_model(cfg)
-    checkpoint = torch.load(ckpt_path, map_location='cpu')
-    audiolm_state_dict = {k.replace('audiolm.', ''): v for k, v in checkpoint.items() if k.startswith('audiolm')}
-    audiolm.load_state_dict(audiolm_state_dict, strict=False)
-    audiolm = audiolm.eval()
+    with suppress_output():
+        audiolm = builders.get_lm_model(cfg)
+        checkpoint = torch.load(ckpt_path, map_location='cpu')
+        audiolm_state_dict = {k.replace('audiolm.', ''): v for k, v in checkpoint.items() if k.startswith('audiolm')}
+        audiolm.load_state_dict(audiolm_state_dict, strict=False)
+        audiolm = audiolm.eval()
 
     offload_audiolm = True if 'offload' in cfg.keys() and 'audiolm' in cfg.offload else False
     if offload_audiolm:
-        audiolm_offload_param = OffloadParamParse.parse_config(audiolm, cfg.offload.audiolm)
-        audiolm_offload_param.show()
-        offload_profiler = OffloadProfiler(device_index=0, **(audiolm_offload_param.init_param_dict()))
-        offload_profiler.offload_layer(**(audiolm_offload_param.offload_layer_param_dict()))
-        offload_profiler.clean_cache_wrapper(**(audiolm_offload_param.clean_cache_param_dict()))
+        with suppress_output():
+            audiolm_offload_param = OffloadParamParse.parse_config(audiolm, cfg.offload.audiolm)
+            audiolm_offload_param.show()
+            offload_profiler = OffloadProfiler(device_index=0, **(audiolm_offload_param.init_param_dict()))
+            offload_profiler.offload_layer(**(audiolm_offload_param.offload_layer_param_dict()))
+            offload_profiler.clean_cache_wrapper(**(audiolm_offload_param.clean_cache_param_dict()))
     else:
         audiolm = audiolm.cuda().to(torch.float16)
 
@@ -449,9 +459,10 @@ def generate_lowmem(args):
         }
         with torch.autocast(device_type="cuda", dtype=torch.float16):
             with torch.no_grad():
-                tokens = model.generate(**generate_inp, return_tokens=True)
-                if offload_audiolm:
-                    offload_profiler.reset_empty_cache_mem_line()
+                with suppress_output():
+                    tokens = model.generate(**generate_inp, return_tokens=True)
+                    if offload_audiolm:
+                        offload_profiler.reset_empty_cache_mem_line()
         item['tokens'] = tokens
     if offload_audiolm:
         offload_profiler.stop()
@@ -464,18 +475,20 @@ def generate_lowmem(args):
     gc.collect()
     torch.cuda.empty_cache()
 
-    seperate_tokenizer = builders.get_audio_tokenizer_model_cpu(cfg.audio_tokenizer_checkpoint_sep, cfg)
-    device = "cuda:0"
-    seperate_tokenizer.model.device = device
-    seperate_tokenizer.model.vae = seperate_tokenizer.model.vae.to(device)
-    seperate_tokenizer.model.model.device = torch.device(device)
-    seperate_tokenizer = seperate_tokenizer.eval()
+    with suppress_output():
+        seperate_tokenizer = builders.get_audio_tokenizer_model_cpu(cfg.audio_tokenizer_checkpoint_sep, cfg)
+        device = "cuda:0"
+        seperate_tokenizer.model.device = device
+        seperate_tokenizer.model.vae = seperate_tokenizer.model.vae.to(device)
+        seperate_tokenizer.model.model.device = torch.device(device)
+        seperate_tokenizer = seperate_tokenizer.eval()
 
     offload_wav_tokenizer_diffusion =  True if 'offload' in cfg.keys() and 'wav_tokenizer_diffusion' in cfg.offload else False
     if offload_wav_tokenizer_diffusion:
-        sep_offload_param = OffloadParamParse.parse_config(seperate_tokenizer, cfg.offload.wav_tokenizer_diffusion)
-        sep_offload_param.show()
-        sep_offload_profiler = OffloadProfiler(device_index=0, **(sep_offload_param.init_param_dict()))
+        with suppress_output():
+            sep_offload_param = OffloadParamParse.parse_config(seperate_tokenizer, cfg.offload.wav_tokenizer_diffusion)
+            sep_offload_param.show()
+            sep_offload_profiler = OffloadProfiler(device_index=0, **(sep_offload_param.init_param_dict()))
         sep_offload_profiler.offload_layer(**(sep_offload_param.offload_layer_param_dict()))
         sep_offload_profiler.clean_cache_wrapper(**(sep_offload_param.clean_cache_param_dict()))
     else:
@@ -533,6 +546,15 @@ def generate_lowmem(args):
 
 
 if __name__ == "__main__":
+    # Parse args first to check for quiet flag
+    import argparse
+    parser = argparse.ArgumentParser(add_help=False)
+    parser.add_argument('--quiet', action='store_true')
+    quiet_args, _ = parser.parse_known_args()
+    
+    # Disable verbose logging at startup
+    disable_verbose_logging()
+    
     torch.backends.cudnn.enabled = False
     OmegaConf.register_new_resolver("eval", lambda x: eval(x))
     OmegaConf.register_new_resolver("concat", lambda *x: [xxx for xx in x for xxx in xx])
@@ -546,18 +568,29 @@ if __name__ == "__main__":
         reserved = torch.cuda.memory_reserved(device)
         total = torch.cuda.get_device_properties(device).total_memory
         res_mem = (total - reserved) / 1024 / 1024 / 1024
-        print(f"reserved memory: {res_mem}GB")
+        if not args.quiet:
+            print(f"reserved memory: {res_mem}GB")
 
         model_name = args.ckpt_path.split("/")[-1]
         assert model_name in ['songgeneration_base'], f'{model_name} is not supported, currently only songgeneration_base is supported'
         if model_name == 'songgeneration_base':
             if res_mem > 24 and not args.low_mem:
-                print("use generate")
-                generate(args)
+                if not args.quiet:
+                    print("use generate")
+                if args.quiet:
+                    with suppress_output():
+                        generate(args)
+                else:
+                    generate(args)
             else:
                 from codeclm.utils.offload_profiler import OffloadProfiler, OffloadParamParse
-                print("use generate_lowmem")
-                generate_lowmem(args)
+                if not args.quiet:
+                    print("use generate_lowmem")
+                if args.quiet:
+                    with suppress_output():
+                        generate_lowmem(args)
+                else:
+                    generate_lowmem(args)
 
     else:
         print("CUDA is not available")

@@ -95,9 +95,11 @@ class OffloadParam(BaseModel):
                     print(" " * (indent + 2) + f"value: {field_value}")
 
     def show(self):
-        print("-"*20 + "[OffloadParam]" + "-"*20)
-        OffloadParam.recursive_print(self)
-        print("-"*40)
+        # Suppressed verbose output
+        pass
+        # print("-"*20 + "[OffloadParam]" + "-"*20)
+        # OffloadParam.recursive_print(self)
+        # print("-"*40)
 
 
 class OffloadParamParse:
@@ -179,7 +181,7 @@ class OffloadProfiler:
         test_data = torch.rand(1,1, device='cpu')
         pin_data = test_data.pin_memory()
         self.pin_memory = pin_data.is_pinned()
-        print(f"pin:{self.pin_memory}")
+        # print(f"pin:{self.pin_memory}")
         self.copy_stream = torch.cuda.Stream() 
         self.copy_queue = queue.Queue() 
         self.layer_param:Dict[str, LayerParamStruct] = {} 

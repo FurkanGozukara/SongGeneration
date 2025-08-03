@@ -15,10 +15,17 @@ from codeclm.models import builders
 from separator import Separator
 from codeclm.utils.offload_profiler import OffloadProfiler, OffloadParamParse
 
+# Import suppression utilities
+sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+from utils.suppress_output import suppress_output, disable_verbose_logging
+
 
 class LeVoInference(torch.nn.Module):
     def __init__(self, ckpt_path):
         super().__init__()
+        
+        # Disable verbose logging at initialization
+        disable_verbose_logging()
 
         torch.backends.cudnn.enabled = False 
         # Use register_resolver for newer OmegaConf versions
@@ -61,9 +68,10 @@ class LeVoInference(torch.nn.Module):
             progress_callback({'phase': 'Loading models', 'message': 'Initializing audio tokenizers...'})
         
         if prompt_audio_path is not None and os.path.exists(prompt_audio_path):
-            separator = Separator()
-            audio_tokenizer = builders.get_audio_tokenizer_model(self.cfg.audio_tokenizer_checkpoint, self.cfg)
-            audio_tokenizer = audio_tokenizer.eval().cuda()
+            with suppress_output():
+                separator = Separator()
+                audio_tokenizer = builders.get_audio_tokenizer_model(self.cfg.audio_tokenizer_checkpoint, self.cfg)
+                audio_tokenizer = audio_tokenizer.eval().cuda()
             pmt_wav, vocal_wav, bgm_wav = separator.run(prompt_audio_path)
             pmt_wav = pmt_wav.cuda()
             vocal_wav = vocal_wav.cuda()
@@ -84,7 +92,8 @@ class LeVoInference(torch.nn.Module):
             if not disable_cache_clear:
                 torch.cuda.empty_cache()
         elif genre is not None and auto_prompt_path is not None:
-            auto_prompt = torch.load(auto_prompt_path)
+            with suppress_output():
+                auto_prompt = torch.load(auto_prompt_path)
             merge_prompt = [item for sublist in auto_prompt.values() for item in sublist]
             if genre == "Auto": 
                 prompt_token = merge_prompt[np.random.randint(0, len(merge_prompt))]
@@ -108,19 +117,21 @@ class LeVoInference(torch.nn.Module):
         if progress_callback:
             progress_callback({'phase': 'Loading models', 'message': 'Loading language model...'})
 
-        audiolm = builders.get_lm_model(self.cfg)
-        checkpoint = torch.load(self.pt_path, map_location='cpu')
-        audiolm_state_dict = {k.replace('audiolm.', ''): v for k, v in checkpoint.items() if k.startswith('audiolm')}
-        audiolm.load_state_dict(audiolm_state_dict, strict=False)
-        audiolm = audiolm.eval()
+        with suppress_output():
+            audiolm = builders.get_lm_model(self.cfg)
+            checkpoint = torch.load(self.pt_path, map_location='cpu')
+            audiolm_state_dict = {k.replace('audiolm.', ''): v for k, v in checkpoint.items() if k.startswith('audiolm')}
+            audiolm.load_state_dict(audiolm_state_dict, strict=False)
+            audiolm = audiolm.eval()
 
         offload_audiolm = False if disable_offload else (True if 'offload' in self.cfg.keys() and 'audiolm' in self.cfg.offload else False)
         if offload_audiolm:
-            audiolm_offload_param = OffloadParamParse.parse_config(audiolm, self.cfg.offload.audiolm)
-            audiolm_offload_param.show()
-            offload_profiler = OffloadProfiler(device_index=0, **(audiolm_offload_param.init_param_dict()))
-            offload_profiler.offload_layer(**(audiolm_offload_param.offload_layer_param_dict()))
-            offload_profiler.clean_cache_wrapper(**(audiolm_offload_param.clean_cache_param_dict()))
+            with suppress_output():
+                audiolm_offload_param = OffloadParamParse.parse_config(audiolm, self.cfg.offload.audiolm)
+                audiolm_offload_param.show()
+                offload_profiler = OffloadProfiler(device_index=0, **(audiolm_offload_param.init_param_dict()))
+                offload_profiler.offload_layer(**(audiolm_offload_param.offload_layer_param_dict()))
+                offload_profiler.clean_cache_wrapper(**(audiolm_offload_param.clean_cache_param_dict()))
         else:
             # Always use float16 for the model to maintain compatibility
             audiolm = audiolm.cuda().to(torch.float16)
@@ -159,15 +170,17 @@ class LeVoInference(torch.nn.Module):
 
         if disable_fp16:
             with torch.no_grad():
-                tokens = model.generate(**generate_inp, return_tokens=True)
-                if offload_audiolm:
-                    offload_profiler.reset_empty_cache_mem_line()
-        else:
-            with torch.autocast(device_type="cuda", dtype=torch.float16):
-                with torch.no_grad():
+                with suppress_output():
                     tokens = model.generate(**generate_inp, return_tokens=True)
                     if offload_audiolm:
                         offload_profiler.reset_empty_cache_mem_line()
+        else:
+            with torch.autocast(device_type="cuda", dtype=torch.float16):
+                with torch.no_grad():
+                    with suppress_output():
+                        tokens = model.generate(**generate_inp, return_tokens=True)
+                        if offload_audiolm:
+                            offload_profiler.reset_empty_cache_mem_line()
         
         if offload_audiolm:
             offload_profiler.stop()
@@ -190,23 +203,25 @@ class LeVoInference(torch.nn.Module):
         if progress_callback:
             progress_callback({'phase': 'Diffusion', 'message': f'Running {num_steps} diffusion steps...'})
 
-        if disable_sequential:
-            seperate_tokenizer = builders.get_audio_tokenizer_model(self.cfg.audio_tokenizer_checkpoint_sep, self.cfg)
-        else:
-            seperate_tokenizer = builders.get_audio_tokenizer_model_cpu(self.cfg.audio_tokenizer_checkpoint_sep, self.cfg)
-        device = "cuda:0"
-        seperate_tokenizer.model.device = device
-        seperate_tokenizer.model.vae = seperate_tokenizer.model.vae.to(device)
-        seperate_tokenizer.model.model.device = torch.device(device)
-        seperate_tokenizer = seperate_tokenizer.eval()
+        with suppress_output():
+            if disable_sequential:
+                seperate_tokenizer = builders.get_audio_tokenizer_model(self.cfg.audio_tokenizer_checkpoint_sep, self.cfg)
+            else:
+                seperate_tokenizer = builders.get_audio_tokenizer_model_cpu(self.cfg.audio_tokenizer_checkpoint_sep, self.cfg)
+            device = "cuda:0"
+            seperate_tokenizer.model.device = device
+            seperate_tokenizer.model.vae = seperate_tokenizer.model.vae.to(device)
+            seperate_tokenizer.model.model.device = torch.device(device)
+            seperate_tokenizer = seperate_tokenizer.eval()
 
         offload_wav_tokenizer_diffusion = False if disable_offload else (True if 'offload' in self.cfg.keys() and 'wav_tokenizer_diffusion' in self.cfg.offload else False)
         if offload_wav_tokenizer_diffusion:
-            sep_offload_param = OffloadParamParse.parse_config(seperate_tokenizer, self.cfg.offload.wav_tokenizer_diffusion)
-            sep_offload_param.show()
-            sep_offload_profiler = OffloadProfiler(device_index=0, **(sep_offload_param.init_param_dict()))
-            sep_offload_profiler.offload_layer(**(sep_offload_param.offload_layer_param_dict()))
-            sep_offload_profiler.clean_cache_wrapper(**(sep_offload_param.clean_cache_param_dict()))
+            with suppress_output():
+                sep_offload_param = OffloadParamParse.parse_config(seperate_tokenizer, self.cfg.offload.wav_tokenizer_diffusion)
+                sep_offload_param.show()
+                sep_offload_profiler = OffloadProfiler(device_index=0, **(sep_offload_param.init_param_dict()))
+                sep_offload_profiler.offload_layer(**(sep_offload_param.offload_layer_param_dict()))
+                sep_offload_profiler.clean_cache_wrapper(**(sep_offload_param.clean_cache_param_dict()))
         else:
             seperate_tokenizer.model.model = seperate_tokenizer.model.model.to(device)
 
@@ -218,10 +233,11 @@ class LeVoInference(torch.nn.Module):
         )
 
         with torch.no_grad():
-            if melody_is_wav:
-                wav_seperate = model.generate_audio(tokens, pmt_wav, vocal_wav, bgm_wav, gen_type=gen_type, chunked=chunked, chunk_size=chunk_size, num_steps=num_steps, guidance_scale=guidance_scale)
-            else:
-                wav_seperate = model.generate_audio(tokens, gen_type=gen_type, chunked=chunked, chunk_size=chunk_size, num_steps=num_steps, guidance_scale=guidance_scale)
+            with suppress_output():
+                if melody_is_wav:
+                    wav_seperate = model.generate_audio(tokens, pmt_wav, vocal_wav, bgm_wav, gen_type=gen_type, chunked=chunked, chunk_size=chunk_size, num_steps=num_steps, guidance_scale=guidance_scale)
+                else:
+                    wav_seperate = model.generate_audio(tokens, gen_type=gen_type, chunked=chunked, chunk_size=chunk_size, num_steps=num_steps, guidance_scale=guidance_scale)
 
         if offload_wav_tokenizer_diffusion:
             sep_offload_profiler.reset_empty_cache_mem_line()
