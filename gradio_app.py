@@ -402,8 +402,10 @@ def submit_lyrics(
     
     current_time = datetime.now().strftime("%Y%m%d_%H%M%S")
     
+    # IMPORTANT: song_data["lyrics"] contains the user's lyrics and must NEVER be overwritten
+    # when looping through presets. Each preset should use these same lyrics.
     song_data = {
-        "lyrics": formatted_lyrics,
+        "lyrics": formatted_lyrics,  # User's lyrics - constant across all preset loops
         "struct": process_struct(struct),
         "genre": genre,
         "instrument": instrument, 
@@ -440,42 +442,48 @@ def submit_lyrics(
         'record_window': record_window,
     }
     
-    try:
-        # Store initial values before potential randomization
-        current_genre = genre
-        current_instrument = instrument
-        current_emotion = emotion
-        current_timbre = timbre
-        current_gender = gender
-        
-        # Use progress interceptor to capture tqdm output
-        with intercept_progress(progress_callback):
-            audio_data = MODEL(
-                song_data["lyrics"], 
-                f"{current_gender}, {current_timbre}, {current_genre}, {current_emotion}, {current_instrument}",
-                song_data["audio_path"] if song_data["sample_prompt"] else None,
-                None,  # genre parameter (None since we're using description)
-                op.join(APP_DIR, "ckpt/prompt.pt"),  # auto_prompt_path
-                gen_type,  # gen_type from UI
-                gen_params,  # params
-                disable_offload=disable_offload,
-                disable_cache_clear=disable_cache_clear,
-                disable_fp16=disable_fp16,
-                disable_sequential=disable_sequential,
-                progress_callback=progress_callback,
-                cancellation_token=cancellation_token
-            )
-        
-        if audio_data is None:
-            gr.Info("Generation cancelled")
-            return None, None, history, process_history(history), gr.update(visible=False), gr.update(visible=False)
+    # Skip initial generation if we're going to loop through presets
+    # The first preset in the loop will handle the generation
+    if not loop_presets:
+        try:
+            # Store initial values before potential randomization
+            current_genre = genre
+            current_instrument = instrument
+            current_emotion = emotion
+            current_timbre = timbre
+            current_gender = gender
             
-        audio_data = audio_data.cpu().permute(1, 0).float().numpy()
-        
-    except Exception as e:
-        gr.Error(f"Generation failed: {str(e)}")
-        yield None, None, history, process_history(history), gr.update(visible=False), gr.update(visible=False)
-        return
+            # Use progress interceptor to capture tqdm output
+            with intercept_progress(progress_callback):
+                audio_data = MODEL(
+                    song_data["lyrics"], 
+                    f"{current_gender}, {current_timbre}, {current_genre}, {current_emotion}, {current_instrument}",
+                    song_data["audio_path"] if song_data["sample_prompt"] else None,
+                    None,  # genre parameter (None since we're using description)
+                    op.join(APP_DIR, "ckpt/prompt.pt"),  # auto_prompt_path
+                    gen_type,  # gen_type from UI
+                    gen_params,  # params
+                    disable_offload=disable_offload,
+                    disable_cache_clear=disable_cache_clear,
+                    disable_fp16=disable_fp16,
+                    disable_sequential=disable_sequential,
+                    progress_callback=progress_callback,
+                    cancellation_token=cancellation_token
+                )
+            
+            if audio_data is None:
+                gr.Info("Generation cancelled")
+                return None, None, history, process_history(history), gr.update(visible=False), gr.update(visible=False)
+                
+            audio_data = audio_data.cpu().permute(1, 0).float().numpy()
+            
+        except Exception as e:
+            gr.Error(f"Generation failed: {str(e)}")
+            yield None, None, history, process_history(history), gr.update(visible=False), gr.update(visible=False)
+            return
+    else:
+        # Initialize audio_data to None when looping presets
+        audio_data = None
     
     # Load all presets if loop_presets is enabled
     presets_to_use = [None]  # None means use current settings
@@ -483,7 +491,10 @@ def submit_lyrics(
         all_presets = preset_manager.get_preset_list()
         if all_presets:
             presets_to_use = all_presets
-            output_messages(f"Looping through {len(presets_to_use)} presets")
+            output_messages(f"\n{'='*50}")
+            output_messages(f"PRESET LOOP MODE: Processing {len(presets_to_use)} presets")
+            output_messages(f"Presets to process: {', '.join(presets_to_use)}")
+            output_messages(f"{'='*50}\n")
         else:
             output_messages("No presets found, using current settings only")
     
@@ -498,15 +509,33 @@ def submit_lyrics(
     starting_file_number = get_next_file_number(output_dir)
     file_counter = 0
     
+    # Show initial file numbering info
+    existing_files = [f for f in os.listdir(output_dir) if f.endswith(('.wav', '.mp3', '.mp4'))]
+    if existing_files:
+        output_messages(f"Found {len(existing_files)} existing files in output directory")
+    output_messages(f"Starting file number: {starting_file_number:04d}")
+    
     # Preset loop (outer loop)
     for preset_idx, preset_name in enumerate(presets_to_use):
+        # Progress info for preset
+        if loop_presets:
+            output_messages(f"\n{'='*40}")
+            output_messages(f"Processing Preset {preset_idx + 1}/{len(presets_to_use)}: {preset_name if preset_name else 'Current Settings'}")
+            output_messages(f"{'='*40}")
+        
         # Load preset if specified
         if preset_name:
+            output_messages(f"Loading preset '{preset_name}'...")
             preset_data, message = preset_manager.load_preset(preset_name)
             if preset_data:
-                output_messages(f"Using preset: {preset_name}")
-                # Override current parameters with preset values (except lyrics)
-                current_lyrics = lyrics  # Always keep user's lyrics
+                # Show preset configuration being loaded
+                print(f"[DEBUG] {message}")
+                print(f"[DEBUG] Preset config: loop_presets={preset_data.get('loop_presets')}, randomize_params={preset_data.get('randomize_params')}")
+                
+                # IMPORTANT: When looping presets, ALWAYS use the user's lyrics, never the preset's lyrics
+                # This ensures consistency across all preset generations
+                
+                # Override current parameters with preset values (EXCLUDING lyrics)
                 genre = preset_data.get('genre', genre)
                 instrument = preset_data.get('instrument', instrument)
                 emotion = preset_data.get('emotion', emotion)
@@ -520,6 +549,9 @@ def submit_lyrics(
                 current_gender = gender
                 # Also get preset's randomize setting
                 randomize_params = preset_data.get('randomize_params', randomize_params)
+                
+                output_messages(f"Using preset settings: {current_genre}, {current_instrument}, {current_emotion}, {current_timbre}, {current_gender}")
+                output_messages(f"Keeping user's lyrics (not using preset lyrics)")
             else:
                 output_messages(f"Failed to load preset {preset_name}, skipping")
                 continue
@@ -531,6 +563,15 @@ def submit_lyrics(
                 break
             
             generation_count += 1
+            
+            # Detailed progress info
+            if loop_presets or num_generations > 1:
+                output_messages(f"\n--- Generation {generation_count}/{total_generations} ---")
+                if preset_name:
+                    output_messages(f"Preset: {preset_name} ({preset_idx + 1}/{len(presets_to_use)})")
+                output_messages(f"Generation: {gen_idx + 1}/{num_generations} within this preset")
+                output_messages(f"Files completed: {file_counter}, Next file: {starting_file_number + file_counter:04d}")
+            
             # Update progress for multiple generations
             progress_desc = f"Generating {generation_count}/{total_generations}"
             if preset_name:
@@ -560,9 +601,10 @@ def submit_lyrics(
                 current_gender = random.choice(GENDERS)
                 output_messages(f"Randomized: {current_genre}, {current_instrument}, {current_emotion}, {current_timbre}, {current_gender}")
             
-            # Generate audio for each preset/generation (skip only the very first if no presets)
-            # If we're using presets, always generate. If not using presets, skip first generation.
-            should_generate = preset_name is not None or gen_idx > 0
+            # Generate audio for each preset/generation
+            # When loop_presets is True: always generate (including first)
+            # When loop_presets is False: skip first generation if we already generated above
+            should_generate = loop_presets or (not loop_presets and (preset_name is not None or gen_idx > 0))
             
             if should_generate:
                 try:
@@ -592,76 +634,92 @@ def submit_lyrics(
                     gr.Error(f"Generation {gen_idx + 1} failed: {str(e)}")
                     continue
             
-                # Save the audio with sequential numbering
-            # Calculate the current file number
-            current_file_number = starting_file_number + file_counter
-            file_counter += 1
-            
-            # Construct filename based on preset and generation
-            if preset_name and num_generations > 1:
-                base_filename = f"{current_file_number:04d}_{preset_name}_gen{gen_idx+1:03d}"
-            elif preset_name:
-                base_filename = f"{current_file_number:04d}_{preset_name}"
-            elif num_generations > 1:
-                base_filename = f"{current_file_number:04d}_gen{gen_idx+1:03d}"
+            # Save the audio with sequential numbering
+            # Make sure we have audio_data to save
+            if audio_data is not None:
+                # Calculate the current file number
+                current_file_number = starting_file_number + file_counter
+                file_counter += 1
+                
+                # Construct filename based on preset and generation
+                if preset_name and num_generations > 1:
+                    base_filename = f"{current_file_number:04d}_{preset_name}_gen{gen_idx+1:03d}"
+                elif preset_name:
+                    base_filename = f"{current_file_number:04d}_{preset_name}"
+                elif num_generations > 1:
+                    base_filename = f"{current_file_number:04d}_gen{gen_idx+1:03d}"
+                else:
+                    base_filename = f"{current_file_number:04d}"
+                
+                wav_path = op.join(output_dir, f"{base_filename}.wav")
+                wavfile.write(wav_path, MODEL.cfg.sample_rate, audio_data)
+                output_messages(f"✓ Audio saved: {base_filename}.wav")
+                
+                # Convert to MP3 if requested
+                mp3_path = None
+                if save_mp3:
+                    mp3_path = op.join(output_dir, f"{base_filename}.mp3")
+                    if convert_wav_to_mp3(wav_path, mp3_path, '192k'):
+                        output_messages(f"✓ MP3 saved: {base_filename}.mp3")
+                    else:
+                        mp3_path = None
+                        output_messages("✗ Failed to convert to MP3")
+                
+                # Create video if image is provided
+                video_path = None
+                if image_path:
+                    video_path = op.join(output_dir, f"{base_filename}.mp4")
+                    if create_video_from_image_and_audio(image_path, wav_path, video_path):
+                        output_messages(f"✓ Video saved: {base_filename}.mp4")
+                    else:
+                        video_path = None
+                        output_messages("✗ Failed to create video")
+                
+                # For the first generation, update the main outputs
+                if gen_idx == 0 and preset_idx == 0:
+                    song_data["audio"] = wav_path
+                    song_data["mp3"] = mp3_path
+                    song_data["video"] = video_path
+                
+                # Save metadata (use actual generated values, not original if randomized)
+                metadata = collect_current_parameters(
+                    lyrics, current_genre, current_instrument, current_emotion, current_timbre, current_gender,
+                    sample_prompt, audio_path, image_path, save_mp3, used_seed,
+                    max_gen_length, diffusion_steps, temperature, top_k, top_p,
+                    cfg_coef, guidance_scale, use_sampling, extend_stride,
+                    gen_type, chunked, chunk_size, record_tokens, record_window,
+                    disable_offload, disable_cache_clear, disable_fp16, disable_sequential,
+                    num_generations, loop_presets, randomize_params
+                )
+                metadata['timestamp'] = current_time
+                metadata['model'] = ckpt_path
+                metadata['generation_index'] = gen_idx + 1
+                metadata['total_generations'] = num_generations
+                metadata['output_files'] = {
+                    'wav': wav_path,
+                    'mp3': mp3_path,
+                    'mp4': video_path
+                }
+                
+                save_metadata(wav_path, metadata)
+                generated_files.append({'wav': wav_path, 'mp3': mp3_path, 'mp4': video_path})
+                
+                # Show completion status for this generation
+                output_messages(f"✓ Generation {generation_count}/{total_generations} complete")
             else:
-                base_filename = f"{current_file_number:04d}"
-            
-            wav_path = op.join(output_dir, f"{base_filename}.wav")
-            wavfile.write(wav_path, MODEL.cfg.sample_rate, audio_data)
-            output_messages(f"Generated audio saved to: {wav_path}")
-            
-            # Convert to MP3 if requested
-            mp3_path = None
-            if save_mp3:
-                mp3_path = op.join(output_dir, f"{base_filename}.mp3")
-                if convert_wav_to_mp3(wav_path, mp3_path, '192k'):
-                    output_messages(f"Generated MP3 saved to: {mp3_path}")
-                else:
-                    mp3_path = None
-                    output_messages("Failed to convert to MP3")
-            
-            # Create video if image is provided
-            video_path = None
-            if image_path:
-                video_path = op.join(output_dir, f"{base_filename}.mp4")
-                if create_video_from_image_and_audio(image_path, wav_path, video_path):
-                    output_messages(f"Generated video saved to: {video_path}")
-                else:
-                    video_path = None
-                    output_messages("Failed to create video")
-            
-            # For the first generation, update the main outputs
-            if gen_idx == 0:
-                song_data["audio"] = wav_path
-                song_data["mp3"] = mp3_path
-                song_data["video"] = video_path
-            
-            # Save metadata (use actual generated values, not original if randomized)
-            metadata = collect_current_parameters(
-                lyrics, current_genre, current_instrument, current_emotion, current_timbre, current_gender,
-                sample_prompt, audio_path, image_path, save_mp3, used_seed,
-                max_gen_length, diffusion_steps, temperature, top_k, top_p,
-                cfg_coef, guidance_scale, use_sampling, extend_stride,
-                gen_type, chunked, chunk_size, record_tokens, record_window,
-                disable_offload, disable_cache_clear, disable_fp16, disable_sequential,
-                num_generations, loop_presets, randomize_params
-            )
-            metadata['timestamp'] = current_time
-            metadata['model'] = ckpt_path
-            metadata['generation_index'] = gen_idx + 1
-            metadata['total_generations'] = num_generations
-            metadata['output_files'] = {
-                'wav': wav_path,
-                'mp3': mp3_path,
-                'mp4': video_path
-            }
-            
-            save_metadata(wav_path, metadata)
-            generated_files.append({'wav': wav_path, 'mp3': mp3_path, 'mp4': video_path})
+                output_messages(f"⚠️ No audio data for generation {generation_count}/{total_generations}, skipping file save")
     
     # Update history
     history.append({"role": "user", "content": f"Generate {num_generations} song(s) with lyrics: {lyrics[:50]}..."})
+    
+    # Final summary
+    output_messages(f"\n{'='*50}")
+    output_messages(f"GENERATION COMPLETE")
+    output_messages(f"Total files generated: {len(generated_files)}")
+    if loop_presets:
+        output_messages(f"Presets processed: {len([p for p in presets_to_use if p is not None])}")
+    output_messages(f"Output directory: {output_dir}")
+    output_messages(f"{'='*50}\n")
     
     # Check if cancelled
     if cancellation_token.is_cancelled():

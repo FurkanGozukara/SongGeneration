@@ -41,6 +41,7 @@ class PresetManager:
         try:
             with open(preset_path, 'r', encoding='utf-8') as f:
                 preset_data = json.load(f)
+            print(f"[PresetManager] Loaded preset '{preset_name}' with loop_presets={preset_data.get('loop_presets', False)}, randomize_params={preset_data.get('randomize_params', False)}")
             return preset_data, f"Preset '{preset_name}' loaded successfully"
         except Exception as e:
             return None, f"Error loading preset: {str(e)}"
