@@ -732,8 +732,8 @@ def submit_lyrics(
     yield song_data["audio"], song_data.get("video"), history, process_history(history), gr.update(visible=False), gr.update(visible=False)
 
 # Create Gradio interface
-with gr.Blocks(title="SECourses LeVo Song Generation App V1",theme=gr.themes.Soft()) as demo:
-    gr.Markdown("# LeVo Song Generation")
+with gr.Blocks(title="SECourses LeVo Song Generation App",theme=gr.themes.Soft()) as demo:
+    gr.Markdown("# SECourses LeVo Song Generator V1 : https://www.patreon.com/posts/135592123")
     
     history = gr.State([])
     session = gr.State({})
@@ -853,7 +853,7 @@ with gr.Blocks(title="SECourses LeVo Song Generation App V1",theme=gr.themes.Sof
                         num_generations = gr.Slider(
                     label="Number of Generations", 
                     minimum=1, 
-                    maximum=10, 
+                    maximum=999, 
                     value=1, 
                     step=1,
                     info="Generate multiple songs with different seeds"
