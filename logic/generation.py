@@ -220,7 +220,24 @@ def generate_single_song(model, params, progress_tracker=None, cancellation_toke
         return None
     
     # Call the model
-    description = f"{params['gender']}, {params['timbre']}, {params['genre']}, {params['emotion']}, {params['instrument']}"
+    # Build description string with extra prompt support
+    if params.get('force_extra_prompt'):
+        # Force mode: use only the extra prompt, ignore dropdowns
+        if params.get('extra_prompt', '').strip():
+            description = params['extra_prompt'].strip()
+        else:
+            # Warning: force mode enabled but no extra prompt provided
+            print("⚠️ Warning: 'force_extra_prompt' is True but no extra prompt was provided!")
+            print("Using minimal description for generation...")
+            description = "music"  # Minimal fallback description
+    else:
+        # Normal mode: use dropdown values with optional extra prompt
+        base_description = f"{params['gender']}, {params['timbre']}, {params['genre']}, {params['emotion']}, {params['instrument']}"
+        if params.get('extra_prompt', '').strip():
+            description = f"{base_description}, {params['extra_prompt'].strip()}"
+        else:
+            description = base_description
+    
     audio_path = params['audio_path'] if params.get('sample_prompt') else None
     
     # Create internal progress callback if provided
