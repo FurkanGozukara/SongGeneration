@@ -341,28 +341,85 @@ def run_batch_processing(
         yield gr.update(visible=False), gr.update(visible=False), error_msg
 
 def validate_audio_file(audio_path):
-    """Validate uploaded audio file"""
+    """Validate uploaded audio/video file and extract audio if needed"""
     if not audio_path:
         return None, None
     
     if not os.path.exists(audio_path):
-        return None, "Audio file not found"
+        return None, "File not found"
     
     try:
-        # Check file size (limit to 50MB)
+        # Check file size (limit to 100MB for video files)
         file_size = os.path.getsize(audio_path) / (1024 * 1024)  # Convert to MB
-        if file_size > 50:
-            return None, f"Audio file too large ({file_size:.1f}MB). Maximum size is 50MB."
+        if file_size > 100:
+            return None, f"File too large ({file_size:.1f}MB). Maximum size is 100MB."
         
-        # Check if file is readable
-        import torchaudio
-        audio, sr = torchaudio.load(audio_path)
-        duration = audio.shape[-1] / sr
+        # Get file extension
+        file_ext = os.path.splitext(audio_path)[1].lower()
+        video_extensions = ['.mp4', '.avi', '.mov', '.mkv', '.webm', '.flv', '.wmv', '.m4v']
+        audio_extensions = ['.wav', '.mp3', '.flac', '.m4a', '.aac', '.ogg', '.wma']
         
-        # Audio file is valid
-        return audio_path, None
+        # If it's a video file, extract audio
+        if file_ext in video_extensions:
+            print(f"Detected video file: {os.path.basename(audio_path)}")
+            print("Extracting audio from video...")
+            
+            # Create temp directory for extracted audio
+            temp_dir = os.path.join(APP_DIR, "temp")
+            os.makedirs(temp_dir, exist_ok=True)
+            
+            # Generate unique filename for extracted audio
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            extracted_audio_path = os.path.join(temp_dir, f"extracted_audio_{timestamp}.wav")
+            
+            # Use ffmpeg to extract audio
+            try:
+                # Build ffmpeg command
+                cmd = [
+                    'ffmpeg',
+                    '-i', audio_path,           # Input video file
+                    '-vn',                      # No video
+                    '-acodec', 'pcm_s16le',     # Audio codec
+                    '-ar', '48000',             # Sample rate 48kHz
+                    '-ac', '2',                 # Stereo
+                    '-y',                       # Overwrite output file
+                    extracted_audio_path        # Output audio file
+                ]
+                
+                # Run ffmpeg
+                result = subprocess.run(cmd, capture_output=True, text=True)
+                
+                if result.returncode != 0:
+                    return None, f"Failed to extract audio from video: {result.stderr}"
+                
+                print(f"Audio extracted successfully to: {extracted_audio_path}")
+                
+                # Validate the extracted audio
+                import torchaudio
+                audio, sr = torchaudio.load(extracted_audio_path)
+                duration = audio.shape[-1] / sr
+                print(f"Extracted audio duration: {duration:.2f} seconds")
+                
+                return extracted_audio_path, None
+                
+            except FileNotFoundError:
+                return None, "ffmpeg not found. Please install ffmpeg to use video files."
+            except Exception as e:
+                return None, f"Error extracting audio from video: {str(e)}"
+        
+        # If it's an audio file, validate it directly
+        elif file_ext in audio_extensions:
+            import torchaudio
+            audio, sr = torchaudio.load(audio_path)
+            duration = audio.shape[-1] / sr
+            print(f"Audio file duration: {duration:.2f} seconds")
+            return audio_path, None
+        
+        else:
+            return None, f"Unsupported file format: {file_ext}. Supported formats: Audio ({', '.join(audio_extensions)}), Video ({', '.join(video_extensions)})"
+            
     except Exception as e:
-        return None, f"Error reading audio file: {str(e)}"
+        return None, f"Error processing file: {str(e)}"
 
 def submit_lyrics(
     lyrics, struct, genre, instrument, bpm, emotion, timbre, gender, extra_prompt, force_extra_prompt,
@@ -1011,15 +1068,39 @@ with gr.Blocks(title="SECourses LeVo Song Generation App",theme=gr.themes.Soft()
                         )
                     
                     # Reference audio section
-                    with gr.Accordion("Reference Audio (Advanced) - Maximum 10 seconds utilized", open=True):
-                        audio_path = gr.Audio(label="Upload Audio File (for consistent voice synthesis)", type="filepath")
+                    with gr.Accordion("Reference Audio/Video (Advanced) - Maximum 10 seconds utilized", open=True):
+                        # Initial file upload to detect type
+                        file_upload = gr.File(
+                            label="Upload Audio or Video File",
+                            file_types=[".mp3", ".wav", ".flac", ".m4a", ".aac", ".ogg", ".opus", ".wma",
+                                       ".mp4", ".avi", ".mov", ".mkv", ".webm", ".flv", ".wmv", ".m4v"],
+                            file_count="single",
+                            visible=True
+                        )
+                        
+                        # Audio component for audio files (with trim feature)
+                        audio_component = gr.Audio(
+                            label="Audio Preview (use trim feature if needed)",
+                            type="filepath",
+                            visible=False
+                        )
+                        
+                        # Hidden component to store the final audio path
+                        audio_path = gr.Textbox(visible=False)
+                        
+                        # Status message
+                        upload_status = gr.Markdown("", visible=False)
+                        
                         gr.Markdown("""
                         **Important Notes:**
-                        - Upload a clear audio sample with the voice you want to replicate
+                        - Upload a clear audio sample or video with the voice you want to replicate
                         - Only the first 10 seconds will be used
                         - Best results with clean vocals (minimal background noise)
-                        - Supported formats: WAV, MP3, FLAC
+                        - **Supported Audio formats:** WAV, MP3, FLAC, M4A, AAC, OGG, WMA
+                        - **Supported Video formats:** MP4, AVI, MOV, MKV, WebM, FLV, WMV, M4V
+                        - For audio files, you can use the trim feature to select a specific portion
                         - Processing reference audio may take additional time
+                        - Maximum file size: 100MB
                         """)
                 
                 with gr.Column(scale=1):
@@ -1588,6 +1669,73 @@ with gr.Blocks(title="SECourses LeVo Song Generation App",theme=gr.themes.Soft()
         outputs=all_inputs
     )
     
+    # Handle file upload and component switching
+    def process_file_upload(file_path):
+        """Process uploaded file and determine component visibility"""
+        if not file_path:
+            return (
+                gr.update(visible=True),   # file_upload
+                gr.update(visible=False),  # audio_component
+                "",                        # audio_path
+                gr.update(visible=False)   # upload_status
+            )
+        
+        # Get file extension
+        file_ext = os.path.splitext(file_path)[1].lower()
+        
+        # Define file types
+        audio_extensions = ['.mp3', '.wav', '.flac', '.m4a', '.aac', '.ogg', '.opus', '.wma']
+        video_extensions = ['.mp4', '.avi', '.mov', '.mkv', '.webm', '.flv', '.wmv', '.m4v']
+        
+        if file_ext in audio_extensions:
+            # Audio file - show audio component with trim feature
+            return (
+                gr.update(visible=False),   # file_upload
+                gr.update(visible=True, value=file_path),  # audio_component
+                file_path,                  # audio_path
+                gr.update(visible=True, value="✅ Audio file loaded. You can use the trim feature above.")  # upload_status
+            )
+        elif file_ext in video_extensions:
+            # Video file - extract audio and show status
+            print(f"Processing video file: {file_path}")
+            extracted_path, error_msg = validate_audio_file(file_path)
+            
+            if error_msg:
+                return (
+                    gr.update(visible=True),   # file_upload
+                    gr.update(visible=False),  # audio_component
+                    "",                        # audio_path
+                    gr.update(visible=True, value=f"❌ Error: {error_msg}")  # upload_status
+                )
+            else:
+                # Show extracted audio in audio component
+                return (
+                    gr.update(visible=False),   # file_upload
+                    gr.update(visible=True, value=extracted_path),  # audio_component
+                    extracted_path,             # audio_path
+                    gr.update(visible=True, value="✅ Audio extracted from video. You can use the trim feature above.")  # upload_status
+                )
+        else:
+            return (
+                gr.update(visible=True),   # file_upload
+                gr.update(visible=False),  # audio_component
+                "",                        # audio_path
+                gr.update(visible=True, value="❌ Unsupported file format")  # upload_status
+            )
+    
+    def update_audio_path(audio_value):
+        """Update the hidden audio path when audio component changes"""
+        return audio_value if audio_value else ""
+    
+    def reset_upload():
+        """Reset the upload components"""
+        return (
+            gr.update(visible=True, value=None),   # file_upload
+            gr.update(visible=False, value=None),  # audio_component
+            "",                                    # audio_path
+            gr.update(visible=False)               # upload_status
+        )
+    
     # Load last used preset on startup
     def load_initial_preset():
         """Load the last used preset on startup"""
@@ -1617,6 +1765,27 @@ with gr.Blocks(title="SECourses LeVo Song Generation App",theme=gr.themes.Soft()
         fn=cancel_generation,
         inputs=[],
         outputs=[cancel_btn, progress_text]
+    )
+    
+    # File upload handlers
+    file_upload.change(
+        fn=process_file_upload,
+        inputs=[file_upload],
+        outputs=[file_upload, audio_component, audio_path, upload_status]
+    )
+    
+    # Update audio path when audio component changes (after trimming)
+    audio_component.change(
+        fn=update_audio_path,
+        inputs=[audio_component],
+        outputs=[audio_path]
+    )
+    
+    # Add clear handler to audio component
+    audio_component.clear(
+        fn=reset_upload,
+        inputs=[],
+        outputs=[file_upload, audio_component, audio_path, upload_status]
     )
     
     # Batch processing button handler
