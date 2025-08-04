@@ -11,19 +11,19 @@ import torch.nn as nn
 import torch.nn.functional as F
 import torchaudio
 
-from tools.torch_tools import wav_to_fbank
+from .tools.torch_tools import wav_to_fbank
 
 from diffusers.utils.torch_utils import randn_tensor
 from transformers import HubertModel
-from libs.rvq.descript_quantize3 import ResidualVectorQuantize
+from .libs.rvq.descript_quantize3 import ResidualVectorQuantize
 
-from models_gpt.models.gpt2_rope2_time_new_correct_mask_noncasual_reflow import GPT2Model
-from models_gpt.models.gpt2_config import GPT2Config
+from .models_gpt.models.gpt2_rope2_time_new_correct_mask_noncasual_reflow import GPT2Model
+from .models_gpt.models.gpt2_config import GPT2Config
 
 from torch.cuda.amp import autocast
 
 
-from our_MERT_BESTRQ.test import load_model
+from .our_MERT_BESTRQ.test import load_model
 
 class HubertModelWithFinalProj(HubertModel):
     def __init__(self, config):
@@ -294,9 +294,11 @@ class PromptCondAudioDiffusion(nn.Module):
         self.rsq48towav2vec = torchaudio.transforms.Resample(48000, 16000)
         # self.wav2vec = Wav2Vec2BertModel.from_pretrained("facebook/w2v-bert-2.0", trust_remote_code=True)
         # self.wav2vec_processor = AutoFeatureExtractor.from_pretrained("facebook/w2v-bert-2.0", trust_remote_code=True)
+        import os
+        base_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
         self.bestrq = load_model(
-            model_dir='codeclm/tokenizer/Flow1dVAE/our_MERT_BESTRQ/mert_fairseq',
-            checkpoint_dir='ckpt/encode-s12k.pt',
+            model_dir=os.path.join(base_dir, 'codeclm/tokenizer/Flow1dVAE/our_MERT_BESTRQ/mert_fairseq'),
+            checkpoint_dir=os.path.join(base_dir, 'ckpt/encode-s12k.pt'),
         )
         self.rsq48tobestrq = torchaudio.transforms.Resample(48000, 24000)
         self.rsq48tohubert = torchaudio.transforms.Resample(48000, 16000)

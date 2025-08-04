@@ -68,29 +68,64 @@ class LeVoInference(torch.nn.Module):
             progress_callback({'phase': 'Loading models', 'message': 'Initializing audio tokenizers...'})
         
         if prompt_audio_path is not None and os.path.exists(prompt_audio_path):
-            with suppress_output():
-                separator = Separator()
-                audio_tokenizer = builders.get_audio_tokenizer_model(self.cfg.audio_tokenizer_checkpoint, self.cfg)
-                audio_tokenizer = audio_tokenizer.eval().cuda()
-            pmt_wav, vocal_wav, bgm_wav = separator.run(prompt_audio_path)
-            pmt_wav = pmt_wav.cuda()
-            vocal_wav = vocal_wav.cuda()
-            bgm_wav = bgm_wav.cuda()
-            with torch.no_grad():
-                pmt_wav, _ = audio_tokenizer.encode(pmt_wav)
-            del audio_tokenizer
-            del separator
-            if not disable_cache_clear:
-                torch.cuda.empty_cache()
+            try:
+                if progress_callback:
+                    progress_callback({'phase': 'Processing audio', 'message': 'Loading vocal separation model...'})
+                    
+                with suppress_output():
+                    separator = Separator()
+                    
+                if progress_callback:
+                    progress_callback({'phase': 'Processing audio', 'message': 'Loading audio tokenizer (1/2)...'})
+                    
+                with suppress_output():
+                    audio_tokenizer = builders.get_audio_tokenizer_model(self.cfg.audio_tokenizer_checkpoint, self.cfg)
+                    audio_tokenizer = audio_tokenizer.eval().cuda()
+                    
+                if progress_callback:
+                    progress_callback({'phase': 'Processing audio', 'message': 'Separating vocals from background...'})
+                    
+                pmt_wav, vocal_wav, bgm_wav = separator.run(prompt_audio_path)
+                pmt_wav = pmt_wav.cuda()
+                vocal_wav = vocal_wav.cuda()
+                bgm_wav = bgm_wav.cuda()
+                
+                if progress_callback:
+                    progress_callback({'phase': 'Processing audio', 'message': 'Encoding reference audio...'})
+                    
+                with torch.no_grad():
+                    pmt_wav, _ = audio_tokenizer.encode(pmt_wav)
+                    
+                del audio_tokenizer
+                del separator
+                if not disable_cache_clear:
+                    torch.cuda.empty_cache()
 
-            seperate_tokenizer = builders.get_audio_tokenizer_model(self.cfg.audio_tokenizer_checkpoint_sep, self.cfg)
-            seperate_tokenizer = seperate_tokenizer.eval().cuda()
-            with torch.no_grad():
-                vocal_wav, bgm_wav = seperate_tokenizer.encode(vocal_wav, bgm_wav)
-            del seperate_tokenizer
-            melody_is_wav = False
-            if not disable_cache_clear:
-                torch.cuda.empty_cache()
+                if progress_callback:
+                    progress_callback({'phase': 'Processing audio', 'message': 'Loading audio tokenizer (2/2)...'})
+                    
+                with suppress_output():
+                    seperate_tokenizer = builders.get_audio_tokenizer_model(self.cfg.audio_tokenizer_checkpoint_sep, self.cfg)
+                    seperate_tokenizer = seperate_tokenizer.eval().cuda()
+                    
+                if progress_callback:
+                    progress_callback({'phase': 'Processing audio', 'message': 'Encoding vocal and background separately...'})
+                    
+                with torch.no_grad():
+                    vocal_wav, bgm_wav = seperate_tokenizer.encode(vocal_wav, bgm_wav)
+                    
+                del seperate_tokenizer
+                melody_is_wav = False
+                if not disable_cache_clear:
+                    torch.cuda.empty_cache()
+                    
+                if progress_callback:
+                    progress_callback({'phase': 'Processing audio', 'message': 'Reference audio processing complete'})
+                    
+            except Exception as e:
+                if progress_callback:
+                    progress_callback({'phase': 'Error', 'message': f'Audio processing failed: {str(e)}'})
+                raise
         elif genre is not None and auto_prompt_path is not None:
             with suppress_output():
                 auto_prompt = torch.load(auto_prompt_path)

@@ -29,7 +29,7 @@ def save_metadata(file_path, metadata):
 
 def collect_generation_parameters(
     lyrics, genre, instrument, emotion, timbre, gender,
-    sample_prompt, audio_path, image_path, save_mp3, seed,
+    audio_path, image_path, save_mp3, seed,
     max_gen_length, diffusion_steps, temperature, top_k, top_p,
     cfg_coef, guidance_scale, use_sampling, extend_stride,
     gen_type, chunked, chunk_size, record_tokens, record_window,
@@ -43,7 +43,6 @@ def collect_generation_parameters(
         'emotion': emotion,
         'timbre': timbre,
         'gender': gender,
-        'sample_prompt': sample_prompt,
         'audio_path': audio_path,
         'image_path': image_path,
         'save_mp3': save_mp3,

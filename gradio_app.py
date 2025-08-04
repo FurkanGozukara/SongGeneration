@@ -100,7 +100,7 @@ preset_manager = PresetManager(PRESET_DIR)
 
 def collect_current_parameters(
     lyrics, genre, instrument, bpm, emotion, timbre, gender, extra_prompt, force_extra_prompt,
-    sample_prompt, audio_path, image_path, save_mp3, seed,
+    audio_path, image_path, save_mp3, seed,
     max_gen_length, diffusion_steps, temperature, top_k, top_p,
     cfg_coef, guidance_scale, use_sampling, extend_stride,
     gen_type, chunked, chunk_size, record_tokens, record_window,
@@ -118,7 +118,6 @@ def collect_current_parameters(
         'gender': gender,
         'extra_prompt': extra_prompt,
         'force_extra_prompt': force_extra_prompt,
-        'sample_prompt': sample_prompt,
         'audio_path': audio_path,
         'image_path': image_path,
         'save_mp3': save_mp3,
@@ -251,7 +250,7 @@ def cancel_generation():
 def run_batch_processing(
     input_folder, output_folder, skip_existing, loop_presets, num_generations,
     lyrics, genre, instrument, bpm, emotion, timbre, gender, extra_prompt, force_extra_prompt,
-    sample_prompt, audio_path, image_path, save_mp3, seed,
+    audio_path, image_path, save_mp3, seed,
     max_gen_length, diffusion_steps, temperature, top_k, top_p,
     cfg_coef, guidance_scale, use_sampling, extend_stride,
     gen_type, chunked, chunk_size, record_tokens, record_window,
@@ -269,7 +268,7 @@ def run_batch_processing(
     # Collect base parameters
     base_params = collect_current_parameters(
         lyrics, genre, instrument, bpm, emotion, timbre, gender, extra_prompt, force_extra_prompt,
-        sample_prompt, audio_path, image_path, save_mp3, seed,
+        audio_path, image_path, save_mp3, seed,
         max_gen_length, diffusion_steps, temperature, top_k, top_p,
         cfg_coef, guidance_scale, use_sampling, extend_stride,
         gen_type, chunked, chunk_size, record_tokens, record_window,
@@ -341,9 +340,33 @@ def run_batch_processing(
         gr.Error(error_msg)
         yield gr.update(visible=False), gr.update(visible=False), error_msg
 
+def validate_audio_file(audio_path):
+    """Validate uploaded audio file"""
+    if not audio_path:
+        return None, None
+    
+    if not os.path.exists(audio_path):
+        return None, "Audio file not found"
+    
+    try:
+        # Check file size (limit to 50MB)
+        file_size = os.path.getsize(audio_path) / (1024 * 1024)  # Convert to MB
+        if file_size > 50:
+            return None, f"Audio file too large ({file_size:.1f}MB). Maximum size is 50MB."
+        
+        # Check if file is readable
+        import torchaudio
+        audio, sr = torchaudio.load(audio_path)
+        duration = audio.shape[-1] / sr
+        
+        # Audio file is valid
+        return audio_path, None
+    except Exception as e:
+        return None, f"Error reading audio file: {str(e)}"
+
 def submit_lyrics(
     lyrics, struct, genre, instrument, bpm, emotion, timbre, gender, extra_prompt, force_extra_prompt,
-    sample_prompt, audio_path, image_path, save_mp3, seed,
+    audio_path, image_path, save_mp3, seed,
     max_gen_length, diffusion_steps, temperature, top_k, top_p,
     cfg_coef, guidance_scale, use_sampling, extend_stride,
     gen_type, chunked, chunk_size, record_tokens, record_window,
@@ -366,9 +389,8 @@ def submit_lyrics(
         lyrics = lyrics[:MAX_CHARS]
         output_messages(f"Lyrics truncated to {MAX_CHARS} characters to fit token limit")
     
-    print(f"[DEBUG] Received lyrics: '{lyrics[:100]}...' (length: {len(lyrics)} characters)")
+    # Log basic info without debug prefix
     print(f"Lyrics length: {len(lyrics)} characters")
-    print(struct)
     
     # Set seed if provided
     used_seed = seed
@@ -407,6 +429,19 @@ def submit_lyrics(
     
     current_time = datetime.now().strftime("%Y%m%d_%H%M%S")
     
+    # Validate audio file if provided and automatically use it
+    validated_audio_path = audio_path
+    use_audio = False
+    if audio_path:
+        validated_audio_path, error_msg = validate_audio_file(audio_path)
+        if error_msg:
+            gr.Error(f"Audio validation failed: {error_msg}")
+            output_messages(f"⚠️ Audio validation failed: {error_msg}")
+            validated_audio_path = None
+        else:
+            use_audio = True
+            output_messages(f"✓ Using reference audio for consistent voice synthesis")
+    
     # IMPORTANT: song_data["lyrics"] contains the user's lyrics and must NEVER be overwritten
     # when looping through presets. Each preset should use these same lyrics.
     song_data = {
@@ -418,8 +453,8 @@ def submit_lyrics(
         "emotion": emotion,
         "timbre": timbre,
         "gender": gender,
-        "sample_prompt": sample_prompt,
-        "audio_path": audio_path,
+        "sample_prompt": use_audio,
+        "audio_path": validated_audio_path,
         "time": current_time
     }
     
@@ -487,7 +522,8 @@ def submit_lyrics(
                 print("GENERATING SONG WITH PROMPT:")
                 print("="*80)
                 print(f"Description: {full_description}")
-                print(f"Lyrics preview: {song_data['lyrics'][:100]}..." if len(song_data['lyrics']) > 100 else f"Lyrics: {song_data['lyrics']}")
+                if song_data["sample_prompt"] and song_data["audio_path"]:
+                    print(f"Using reference audio for consistent voice")
                 print("="*80 + "\n")
                 
                 audio_data = MODEL(
@@ -538,8 +574,9 @@ def submit_lyrics(
     total_generations = len(presets_to_use) * num_generations
     generation_count = 0
     
-    # Debug randomization setting
-    print(f"[DEBUG] randomize_params={randomize_params}, num_generations={num_generations}")
+    # Log generation settings
+    if num_generations > 1 or randomize_params:
+        print(f"Generation settings: {num_generations} generations, randomization {'enabled' if randomize_params else 'disabled'}")
     
     # Get the starting file number once
     output_dir = op.join(APP_DIR, "output")
@@ -567,8 +604,7 @@ def submit_lyrics(
             preset_data, message = preset_manager.load_preset(preset_name)
             if preset_data:
                 # Show preset configuration being loaded
-                print(f"[DEBUG] {message}")
-                print(f"[DEBUG] Preset config: loop_presets={preset_data.get('loop_presets')}, randomize_params={preset_data.get('randomize_params')}")
+                output_messages(message)
                 
                 # IMPORTANT: When looping presets, ALWAYS use the user's lyrics, never the preset's lyrics
                 # This ensures consistency across all preset generations
@@ -689,7 +725,8 @@ def submit_lyrics(
                         print(f"Description: {full_description}")
                         if preset_name:
                             print(f"Preset: {preset_name}")
-                        print(f"Lyrics preview: {song_data['lyrics'][:100]}..." if len(song_data['lyrics']) > 100 else f"Lyrics: {song_data['lyrics']}")
+                        if song_data["sample_prompt"] and song_data["audio_path"]:
+                            print(f"Using reference audio for consistent voice")
                         print("="*80 + "\n")
                         
                         audio_data = MODEL(
@@ -767,7 +804,7 @@ def submit_lyrics(
                 # Save metadata (use actual generated values, not original if randomized)
                 metadata = collect_current_parameters(
                     lyrics, current_genre, current_instrument, bpm, current_emotion, current_timbre, current_gender, extra_prompt, force_extra_prompt,
-                    sample_prompt, audio_path, image_path, save_mp3, used_seed,
+                    audio_path, image_path, save_mp3, used_seed,
                     max_gen_length, diffusion_steps, temperature, top_k, top_p,
                     cfg_coef, guidance_scale, use_sampling, extend_stride,
                     gen_type, chunked, chunk_size, record_tokens, record_window,
@@ -815,7 +852,7 @@ def submit_lyrics(
 
 # Create Gradio interface
 with gr.Blocks(title="SECourses LeVo Song Generation App",theme=gr.themes.Soft()) as demo:
-    gr.Markdown("# SECourses LeVo Song Generator V3 : https://www.patreon.com/posts/135592123")
+    gr.Markdown("# SECourses LeVo Song Generator V4 : https://www.patreon.com/posts/135592123")
     
     history = gr.State([])
     session = gr.State({})
@@ -974,9 +1011,16 @@ with gr.Blocks(title="SECourses LeVo Song Generation App",theme=gr.themes.Soft()
                         )
                     
                     # Reference audio section
-                    with gr.Accordion("Reference Audio (Advanced)", open=False):
-                        sample_prompt = gr.Checkbox(label="Use Sample Prompt", value=False)
-                        audio_path = gr.Audio(label="Reference Audio (optional)", type="filepath")
+                    with gr.Accordion("Reference Audio (Advanced) - Maximum 10 seconds utilized", open=True):
+                        audio_path = gr.Audio(label="Upload Audio File (for consistent voice synthesis)", type="filepath")
+                        gr.Markdown("""
+                        **Important Notes:**
+                        - Upload a clear audio sample with the voice you want to replicate
+                        - Only the first 10 seconds will be used
+                        - Best results with clean vocals (minimal background noise)
+                        - Supported formats: WAV, MP3, FLAC
+                        - Processing reference audio may take additional time
+                        """)
                 
                 with gr.Column(scale=1):
                     output_audio = gr.Audio(label="Generated Audio", type="filepath")
@@ -1340,13 +1384,13 @@ with gr.Blocks(title="SECourses LeVo Song Generation App",theme=gr.themes.Soft()
         
         # Collect all parameters - args order matches all_inputs order
         # all_inputs = [lyrics, genre, instrument, bpm, emotion, timbre, gender, extra_prompt, force_extra_prompt,
-        #              sample_prompt, audio_path, image_upload, save_mp3_check, seed_input,
+        #              audio_path, image_upload, save_mp3_check, seed_input,
         #              num_generations, loop_presets, randomize_params, ...]
         param_values = list(args)
         
         # Safety check for parameter count
-        if len(param_values) != 35:
-            gr.Error(f"Invalid parameter count: expected 35, got {len(param_values)}")
+        if len(param_values) != 34:
+            gr.Error(f"Invalid parameter count: expected 34, got {len(param_values)}")
             return gr.Dropdown(choices=preset_manager.get_preset_list())
         
         # Create preset data matching the order
@@ -1360,35 +1404,33 @@ with gr.Blocks(title="SECourses LeVo Song Generation App",theme=gr.themes.Soft()
             'gender': param_values[6],
             'extra_prompt': param_values[7],
             'force_extra_prompt': param_values[8],
-            'sample_prompt': param_values[9],
-            'audio_path': param_values[10],
-            'image_path': param_values[11],  # This is image_upload in all_inputs
-            'save_mp3': param_values[12],
-            'seed': param_values[13],
-            'num_generations': param_values[14],
-            'loop_presets': param_values[15],
-            'randomize_params': param_values[16],
-            'max_gen_length': param_values[17],
-            'diffusion_steps': param_values[18],
-            'temperature': param_values[19],
-            'top_k': param_values[20],
-            'top_p': param_values[21],
-            'cfg_coef': param_values[22],
-            'guidance_scale': param_values[23],
-            'use_sampling': param_values[24],
-            'extend_stride': param_values[25],
-            'gen_type': param_values[26],
-            'chunked': param_values[27],
-            'chunk_size': param_values[28],
-            'record_tokens': param_values[29],
-            'record_window': param_values[30],
-            'disable_offload': param_values[31],
-            'disable_cache_clear': param_values[32],
-            'disable_fp16': param_values[33],
-            'disable_sequential': param_values[34]
+            'audio_path': param_values[9],
+            'image_path': param_values[10],  # This is image_upload in all_inputs
+            'save_mp3': param_values[11],
+            'seed': param_values[12],
+            'num_generations': param_values[13],
+            'loop_presets': param_values[14],
+            'randomize_params': param_values[15],
+            'max_gen_length': param_values[16],
+            'diffusion_steps': param_values[17],
+            'temperature': param_values[18],
+            'top_k': param_values[19],
+            'top_p': param_values[20],
+            'cfg_coef': param_values[21],
+            'guidance_scale': param_values[22],
+            'use_sampling': param_values[23],
+            'extend_stride': param_values[24],
+            'gen_type': param_values[25],
+            'chunked': param_values[26],
+            'chunk_size': param_values[27],
+            'record_tokens': param_values[28],
+            'record_window': param_values[29],
+            'disable_offload': param_values[30],
+            'disable_cache_clear': param_values[31],
+            'disable_fp16': param_values[32],
+            'disable_sequential': param_values[33]
         }
-        # Debug: print specific values to verify
-        print(f"Saving preset '{preset_name}' with loop_presets={preset_data.get('loop_presets')}, randomize_params={preset_data.get('randomize_params')}")
+        # Save preset
         
         success, message = preset_manager.save_preset(preset_name, preset_data)
         
@@ -1404,15 +1446,14 @@ with gr.Blocks(title="SECourses LeVo Song Generation App",theme=gr.themes.Soft()
     def handle_load_preset(preset_name, current_lyrics):
         """Load a preset and update all UI components"""
         if not preset_name:
-            return [gr.update()] * 35  # Updated to 35 for all parameters (including bpm)
+            return [gr.update()] * 34  # Updated to 34 for all parameters (excluding sample_prompt)
         
         preset_data, message = preset_manager.load_preset(preset_name)
         if preset_data is None:
             gr.Error(message)
-            return [gr.update()] * 35
+            return [gr.update()] * 34
         
-        # Debug: print loaded values
-        print(f"Loading preset '{preset_name}' with loop_presets={preset_data.get('loop_presets')}, randomize_params={preset_data.get('randomize_params')}")
+        # Load preset values
         
         # Default values matching UI defaults - use current lyrics as default
         defaults = {
@@ -1425,7 +1466,6 @@ with gr.Blocks(title="SECourses LeVo Song Generation App",theme=gr.themes.Soft()
             'gender': 'male',
             'extra_prompt': '',
             'force_extra_prompt': False,
-            'sample_prompt': False,
             'audio_path': None,
             'image_path': None,
             'save_mp3': True,
@@ -1471,7 +1511,6 @@ with gr.Blocks(title="SECourses LeVo Song Generation App",theme=gr.themes.Soft()
             values['gender'],
             values['extra_prompt'],
             values['force_extra_prompt'],
-            values['sample_prompt'],
             values['audio_path'],
             values['image_path'],
             values['save_mp3'],
@@ -1506,7 +1545,7 @@ with gr.Blocks(title="SECourses LeVo Song Generation App",theme=gr.themes.Soft()
     # Connect preset handlers
     all_inputs = [
         lyrics, genre, instrument, bpm, emotion, timbre, gender, extra_prompt, force_extra_prompt,
-        sample_prompt, audio_path, image_upload, save_mp3_check, seed_input,
+        audio_path, image_upload, save_mp3_check, seed_input,
         num_generations, loop_presets, randomize_params, max_gen_length, diffusion_steps, temperature, top_k, top_p,
         cfg_coef, guidance_scale, use_sampling, extend_stride,
         gen_type, chunked, chunk_size, record_tokens, record_window,
@@ -1563,7 +1602,7 @@ with gr.Blocks(title="SECourses LeVo Song Generation App",theme=gr.themes.Soft()
         fn=submit_lyrics,
         inputs=[
             lyrics, struct, genre, instrument, bpm, emotion, timbre, gender, extra_prompt, force_extra_prompt,
-            sample_prompt, audio_path, image_upload, save_mp3_check, seed_input,
+            audio_path, image_upload, save_mp3_check, seed_input,
             max_gen_length, diffusion_steps, temperature, top_k, top_p,
             cfg_coef, guidance_scale, use_sampling, extend_stride,
             gen_type, chunked, chunk_size, record_tokens, record_window,
@@ -1586,7 +1625,7 @@ with gr.Blocks(title="SECourses LeVo Song Generation App",theme=gr.themes.Soft()
         inputs=[
             batch_input_folder, batch_output_folder, skip_existing, loop_presets, num_generations,
             lyrics, genre, instrument, bpm, emotion, timbre, gender, extra_prompt, force_extra_prompt,
-            sample_prompt, audio_path, image_upload, save_mp3_check, seed_input,
+            audio_path, image_upload, save_mp3_check, seed_input,
             max_gen_length, diffusion_steps, temperature, top_k, top_p,
             cfg_coef, guidance_scale, use_sampling, extend_stride,
             gen_type, chunked, chunk_size, record_tokens, record_window,

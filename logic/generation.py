@@ -238,7 +238,8 @@ def generate_single_song(model, params, progress_tracker=None, cancellation_toke
         else:
             description = base_description
     
-    audio_path = params['audio_path'] if params.get('sample_prompt') else None
+    # Use audio path if provided
+    audio_path = params.get('audio_path', None)
     
     # Create internal progress callback if provided
     internal_progress_callback = None

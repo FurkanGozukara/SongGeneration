@@ -8,7 +8,6 @@
   "gender": "male",
   "extra_prompt": "",
   "force_extra_prompt": false,
-  "sample_prompt": false,
   "audio_path": null,
   "image_path": null,
   "save_mp3": true,

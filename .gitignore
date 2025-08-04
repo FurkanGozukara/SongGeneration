@@ -8,3 +8,4 @@ output/
 third_party/
 .claude
 .vs/
+tmp

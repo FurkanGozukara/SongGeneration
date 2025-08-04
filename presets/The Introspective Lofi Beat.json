@@ -5,7 +5,6 @@
   "emotion": "sad",
   "timbre": "soft",
   "gender": "male",
-  "sample_prompt": false,
   "audio_path": null,
   "image_path": null,
   "save_mp3": true,
