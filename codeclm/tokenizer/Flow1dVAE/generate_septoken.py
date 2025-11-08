@@ -17,7 +17,13 @@ try:
 except ImportError:
     import sys
     import os
-    sys.path.append(os.path.join(os.path.dirname(__file__), '..', '..', '..'))
+    from pathlib import Path
+    # Add ckpt directory to path for third_party imports
+    # This file is in SongGeneration/codeclm/tokenizer/Flow1dVAE/
+    # We need to add SongGeneration/ckpt to the path
+    ckpt_dir = Path(__file__).parent.parent.parent.parent / "ckpt"
+    if str(ckpt_dir) not in sys.path:
+        sys.path.insert(0, str(ckpt_dir))
     from third_party.demucs.models.pretrained import get_model_from_yaml
 from filelock import FileLock
 import kaldiio

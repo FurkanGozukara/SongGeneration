@@ -1,8 +1,10 @@
 import os
+import sys
 import torch
 import torchaudio
 import numpy as np
 from typing import Tuple, Optional
+from pathlib import Path
 
 class AudioSeparator:
     """Audio separation utility using Demucs for source separation"""
@@ -22,9 +24,9 @@ class AudioSeparator:
             
         # Set default paths if not provided
         if dm_model_path is None:
-            dm_model_path = os.path.join(os.path.dirname(__file__), '..', 'third_party', 'demucs', 'ckpt', 'htdemucs.pth')
+            dm_model_path = os.path.join(os.path.dirname(__file__), '..', 'ckpt', 'third_party', 'demucs', 'ckpt', 'htdemucs.pth')
         if dm_config_path is None:
-            dm_config_path = os.path.join(os.path.dirname(__file__), '..', 'third_party', 'demucs', 'ckpt', 'htdemucs.yaml')
+            dm_config_path = os.path.join(os.path.dirname(__file__), '..', 'ckpt', 'third_party', 'demucs', 'ckpt', 'htdemucs.yaml')
             
         self.demucs_model = None
         self.dm_model_path = dm_model_path
@@ -37,6 +39,11 @@ class AudioSeparator:
         """Initialize Demucs model for source separation"""
         try:
             if os.path.exists(self.dm_model_path) and os.path.exists(self.dm_config_path):
+                # Add ckpt directory to Python path for third_party imports
+                ckpt_dir = Path(__file__).parent.parent / "ckpt"
+                if str(ckpt_dir) not in sys.path:
+                    sys.path.insert(0, str(ckpt_dir))
+                
                 # Import Demucs model loader
                 try:
                     from third_party.demucs.models.pretrained import get_model_from_yaml

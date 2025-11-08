@@ -2,6 +2,7 @@ from hmac import new
 import sys
 import os
 import argparse
+from pathlib import Path
 
 import time
 import json
@@ -13,14 +14,20 @@ from codeclm.models import builders
 import gc
 from codeclm.trainer.codec_song_pl import CodecLM_PL
 from codeclm.models import CodecLM
-from third_party.demucs.models.pretrained import get_model_from_yaml
 from utils.suppress_output import suppress_output, disable_verbose_logging
+
+# Add ckpt directory to Python path for third_party imports
+ckpt_dir = Path(__file__).parent / "ckpt"
+if str(ckpt_dir) not in sys.path:
+    sys.path.insert(0, str(ckpt_dir))
+
+from third_party.demucs.models.pretrained import get_model_from_yaml
 
 
 auto_prompt_type = ['Pop', 'R&B', 'Dance', 'Jazz', 'Folk', 'Rock', 'Chinese Style', 'Chinese Tradition', 'Metal', 'Reggae', 'Chinese Opera', 'Auto']
 
 class Separator:
-    def __init__(self, dm_model_path='third_party/demucs/ckpt/htdemucs.pth', dm_config_path='third_party/demucs/ckpt/htdemucs.yaml', gpu_id=0) -> None:
+    def __init__(self, dm_model_path='ckpt/third_party/demucs/ckpt/htdemucs.pth', dm_config_path='ckpt/third_party/demucs/ckpt/htdemucs.yaml', gpu_id=0) -> None:
         if torch.cuda.is_available() and gpu_id < torch.cuda.device_count():
             self.device = torch.device(f"cuda:{gpu_id}")
         else:

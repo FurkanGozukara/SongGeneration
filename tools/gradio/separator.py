@@ -1,11 +1,19 @@
 import torchaudio
 import os
 import torch
+import sys
+from pathlib import Path
+
+# Add ckpt directory to Python path so we can import third_party modules
+ckpt_dir = Path(__file__).parent.parent.parent / "ckpt"
+if str(ckpt_dir) not in sys.path:
+    sys.path.insert(0, str(ckpt_dir))
+
 from third_party.demucs.models.pretrained import get_model_from_yaml
 
 
 class Separator(torch.nn.Module):
-    def __init__(self, dm_model_path='third_party/demucs/ckpt/htdemucs.pth', dm_config_path='third_party/demucs/ckpt/htdemucs.yaml', gpu_id=0) -> None:
+    def __init__(self, dm_model_path='ckpt/third_party/demucs/ckpt/htdemucs.pth', dm_config_path='ckpt/third_party/demucs/ckpt/htdemucs.yaml', gpu_id=0) -> None:
         super().__init__()
         if torch.cuda.is_available() and gpu_id < torch.cuda.device_count():
             self.device = torch.device(f"cuda:{gpu_id}")
