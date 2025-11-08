@@ -29,15 +29,49 @@ class LeVoInference(torch.nn.Module):
 
         torch.backends.cudnn.enabled = False 
         # Use register_resolver for newer OmegaConf versions
+        # Check if resolvers are already registered to avoid "already registered" errors
         if hasattr(OmegaConf, 'register_new_resolver'):
             register_method = OmegaConf.register_new_resolver
         else:
             register_method = OmegaConf.register_resolver
-            
-        register_method("eval", lambda x: eval(x))
-        register_method("concat", lambda *x: [xxx for xx in x for xxx in xx])
-        register_method("get_fname", lambda: 'default')
-        register_method("load_yaml", lambda x: list(OmegaConf.load(x)))
+        
+        # Register resolvers only if they're not already registered
+        # Use try-except to handle already-registered resolvers gracefully
+        try:
+            register_method("eval", lambda x: eval(x))
+        except Exception as e:
+            error_str = str(e).lower()
+            if "already registered" in error_str or "already exists" in error_str or "resolved" in error_str and "registered" in error_str:
+                pass  # Resolver already registered, that's fine
+            else:
+                raise
+        
+        try:
+            register_method("concat", lambda *x: [xxx for xx in x for xxx in xx])
+        except Exception as e:
+            error_str = str(e).lower()
+            if "already registered" in error_str or "already exists" in error_str or "resolved" in error_str and "registered" in error_str:
+                pass
+            else:
+                raise
+        
+        try:
+            register_method("get_fname", lambda: 'default')
+        except Exception as e:
+            error_str = str(e).lower()
+            if "already registered" in error_str or "already exists" in error_str or "resolved" in error_str and "registered" in error_str:
+                pass
+            else:
+                raise
+        
+        try:
+            register_method("load_yaml", lambda x: list(OmegaConf.load(x)))
+        except Exception as e:
+            error_str = str(e).lower()
+            if "already registered" in error_str or "already exists" in error_str or "resolved" in error_str and "registered" in error_str:
+                pass
+            else:
+                raise
 
         cfg_path = os.path.join(ckpt_path, 'config.yaml')
         self.pt_path = os.path.join(ckpt_path, 'model.pt')

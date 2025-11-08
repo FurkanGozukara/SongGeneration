@@ -191,9 +191,9 @@ def generate_single_song(model, params, progress_tracker=None, cancellation_toke
     formatted_lyrics = format_lyrics_for_model(params['lyrics'])
     
     # Prepare generation parameters
-    pattern_delay_offset = 250
-    actual_steps = max(params['max_gen_length'] - pattern_delay_offset, 1000)
-    duration_from_steps = min(actual_steps / 25.0, 150.0)
+    # Convert steps to duration (25 steps per second)
+    # No artificial cap - let the model use its full capacity
+    duration_from_steps = params['max_gen_length'] / 25.0
     
     gen_params = {
         'duration': duration_from_steps,

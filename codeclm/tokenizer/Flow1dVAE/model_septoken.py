@@ -5,6 +5,7 @@ import numpy as np
 from tqdm import tqdm
 import typing as tp
 from abc import ABC
+import os
 
 import torch
 import torch.nn as nn
@@ -262,16 +263,18 @@ class PromptCondAudioDiffusion(nn.Module):
         self.rsq48towav2vec = torchaudio.transforms.Resample(48000, 16000)
         # self.wav2vec = Wav2Vec2BertModel.from_pretrained("facebook/w2v-bert-2.0", trust_remote_code=True)
         # self.wav2vec_processor = AutoFeatureExtractor.from_pretrained("facebook/w2v-bert-2.0", trust_remote_code=True)
+        import os
+        base_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
         self.bestrq = load_model(
-            model_dir='codeclm/tokenizer/Flow1dVAE/our_MERT_BESTRQ/mert_fairseq',
-            checkpoint_dir='ckpt/encode-s12k.pt',
+            model_dir=os.path.join(base_dir, 'codeclm/tokenizer/Flow1dVAE/our_MERT_BESTRQ/mert_fairseq'),
+            checkpoint_dir=os.path.join(base_dir, 'ckpt/encode-s12k.pt'),
         )
         self.rsq48tobestrq = torchaudio.transforms.Resample(48000, 24000)
         self.rsq48tohubert = torchaudio.transforms.Resample(48000, 16000)
         for v in self.bestrq.parameters():v.requires_grad = False
         self.rvq_bestrq_emb = ResidualVectorQuantize(input_dim = 1024, n_codebooks = 1, codebook_size = 16_384, codebook_dim = 32, quantizer_dropout = 0.0, stale_tolerance=200)
         self.rvq_bestrq_bgm_emb = ResidualVectorQuantize(input_dim = 1024, n_codebooks = 1, codebook_size = 16_384, codebook_dim = 32, quantizer_dropout = 0.0, stale_tolerance=200)
-        self.hubert = HubertModelWithFinalProj.from_pretrained("ckpt/models--lengyue233--content-vec-best/snapshots/c0b9ba13db21beaa4053faae94c102ebe326fd68")
+        self.hubert = HubertModelWithFinalProj.from_pretrained(os.path.join(base_dir, 'ckpt', 'models--lengyue233--content-vec-best', 'snapshots', 'c0b9ba13db21beaa4053faae94c102ebe326fd68'))
         for v in self.hubert.parameters():v.requires_grad = False
         self.zero_cond_embedding1 = nn.Parameter(torch.randn(32*32,))
         # self.xvecmodel = XVECModel()

@@ -18,11 +18,15 @@ This repository is the official weight repository for LeVo: High-Quality Song Ge
 
 ## Model Versions
 
-|          Model           |                         HuggingFace                          |
-| :----------------------: | :----------------------------------------------------------: |
-|  SongGeneration-base   | <a href="https://huggingface.co/tencent/SongGeneration/tree/main/ckpt/songgeneration_base">v20250520</a> |
-| SongGeneration-base(zh&en) |                         Coming soon                          |
-| SongGeneration-full(zh&en) |                         Coming soon                          |
+| Model                     | Max Length |       Language       | GPU Menmory | RFT(A100) | Download Link                                                |
+| ------------------------- | :--------: | :------------------: | :---------: | :-------: | ------------------------------------------------------------ |
+| SongGeneration-base       |   2m30s    |          zh          |   10G/16G   |   1.26    | You were here |
+| SongGeneration-base-new   |   2m30s    |        zh, en        |   10G/16G   |   1.26    | [Huggingface](https://huggingface.co/lglg666/SongGeneration-base-new) |
+| SongGeneration-base-full  |   4m30s    |        zh, en        |   12G/18G   |   1.30    | [Huggingface](https://huggingface.co/lglg666/SongGeneration-base-full) |
+| SongGeneration-large      |   4m30s    |        zh, en        |   22G/28G   |   1.51    | [Huggingface](https://huggingface.co/lglg666/SongGeneration-large) |
+| SongGeneration-v1.5-small |     2m     | zh, en, es, ja, etc. |      -      |     -     | Coming soon                                                  |
+| SongGeneration-v1.5-base  |   4m30s    | zh, en, es, ja, etc. |      -      |     -     | Coming soon                                                  |
+| SongGeneration-v1.5-large |   4m30s    | zh, en, es, ja, etc. |      -      |     -     | Coming soon                                                  |
 
 ## Overview
 
