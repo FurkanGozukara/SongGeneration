@@ -1412,7 +1412,7 @@ def submit_lyrics(
 
 # Create Gradio interface
 with gr.Blocks(title="SECourses LeVo Song Generation App",theme=gr.themes.Soft()) as demo:
-    gr.Markdown("# 🎵 LeVo Song Generator V5 - Up to 4m30s Songs\n### ★★★★★ Large Model (Default) | ★★★★ Base Full Model | [SECourses Patreon](https://www.patreon.com/posts/135592123)")
+    gr.Markdown("# 🎵 LeVo Song Generator V6 - Up to 4m30s Songs\n### ★★★★★ Large Model (Default) | ★★★★ Base Full Model | [SECourses Patreon](https://www.patreon.com/posts/135592123)")
     
     history = gr.State([])
     session = gr.State({})
