@@ -16,6 +16,7 @@ import torch
 import random
 import argparse
 import threading
+import re
 
 # Import and configure output suppression
 from utils.suppress_output import suppress_output, disable_verbose_logging
@@ -421,12 +422,16 @@ def compose_generation_description(
 
     if use_dropdown:
         attribute_parts = []
-        for value in [gender, timbre, genre, emotion, instrument]:
-            text = str(value).strip() if value is not None else ""
-            if text.lower() == "none":
-                text = ""
-            if text:
-                attribute_parts.append(text)
+        for attr_type, attr_value in [
+            ("gender", gender),
+            ("timbre", timbre),
+            ("genre", genre),
+            ("emotion", emotion),
+            ("instrument", instrument),
+        ]:
+            formatted = format_attribute_for_prompt(attr_type, attr_value)
+            if formatted:
+                attribute_parts.append(formatted)
 
         if bpm is not None and str(bpm).strip():
             try:
@@ -449,7 +454,7 @@ def compose_generation_description(
     if "[Musicality-very-high]" not in base_text:
         base_text = f"[Musicality-very-high], {base_text}"
 
-    return base_text
+    return enhance_prompt_text(base_text)
 
 def format_description_preview(description: str) -> str:
     """Format description preview text for display."""
@@ -459,6 +464,64 @@ def add_none_option(options):
     """Return a new list with 'None' prepended for optional selections."""
     cleaned = [opt for opt in options if opt.lower() != "none"]
     return ["None"] + cleaned
+
+
+def format_attribute_for_prompt(attribute_type: str, value) -> str:
+    """Convert attribute values into richer prompt phrases."""
+    if value is None:
+        return ""
+    text = str(value).strip()
+    if not text or text.lower() == "none":
+        return ""
+    
+    lower_text = text.lower()
+    
+    if attribute_type == "gender":
+        gender_map = {
+            "female": "female vocalist",
+            "male": "male vocalist",
+        }
+        return gender_map.get(lower_text, text)
+    
+    if attribute_type == "timbre":
+        return f"{text} timbre"
+    
+    if attribute_type == "emotion":
+        return f"{text} emotion"
+    
+    if attribute_type == "genre":
+        return f"{text} music"
+    
+    if attribute_type == "instrument":
+        return f"{text} instrumentation"
+    
+    return text
+
+
+def enhance_prompt_text(prompt_text: str) -> str:
+    """Strengthen key tokens so the model adheres to them."""
+    if not prompt_text:
+        return prompt_text
+    
+    def replace_gender(match: re.Match) -> str:
+        word = match.group(0)
+        replacements = {
+            "female": "female vocalist",
+            "male": "male vocalist",
+        }
+        replacement = replacements.get(word.lower())
+        if not replacement:
+            return word
+        
+        if word.isupper():
+            return replacement.upper()
+        if word[0].isupper():
+            return replacement.capitalize()
+        return replacement
+    
+    gender_pattern = re.compile(r"\b(female|male)\b(?!\s+(vocal|voice|singer))", re.IGNORECASE)
+    enhanced = gender_pattern.sub(replace_gender, prompt_text)
+    return enhanced
 
 
 GENRES = add_none_option(load_options('genre.txt'))
@@ -1504,7 +1567,7 @@ def submit_lyrics(
 
 # Create Gradio interface
 with gr.Blocks(title="SECourses LeVo Song Generation App",theme=gr.themes.Soft()) as demo:
-    gr.Markdown("# SECourses Premium LeVo Song Generator V7.0 - Up to 4m30s Songs - https://www.patreon.com/posts/135592123")
+    gr.Markdown("# SECourses Premium LeVo Song Generator V7.1 - Up to 4m30s Songs - https://www.patreon.com/posts/135592123")
     
     history = gr.State([])
     session = gr.State({})

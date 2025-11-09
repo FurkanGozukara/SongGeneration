@@ -100,6 +100,63 @@ def normalize_lyrics(lyrics: str) -> str:
     return " ; ".join(normalized_parts)
 
 
+def _format_attribute_for_prompt(attribute_type: str, value) -> str:
+    """Convert attribute values into richer prompt phrases."""
+    if value is None:
+        return ""
+    text = str(value).strip()
+    if not text or text.lower() == "none":
+        return ""
+
+    lower_text = text.lower()
+
+    if attribute_type == "gender":
+        gender_map = {
+            "female": "female vocalist",
+            "male": "male vocalist",
+        }
+        return gender_map.get(lower_text, text)
+
+    if attribute_type == "timbre":
+        return f"{text} timbre"
+
+    if attribute_type == "emotion":
+        return f"{text} emotion"
+
+    if attribute_type == "genre":
+        return f"{text} music"
+
+    if attribute_type == "instrument":
+        return f"{text} instrumentation"
+
+    return text
+
+
+def _enhance_prompt_text(prompt_text: str) -> str:
+    """Strengthen key tokens so the model adheres to them."""
+    if not prompt_text:
+        return prompt_text
+
+    def replace_gender(match: re.Match) -> str:
+        word = match.group(0)
+        replacements = {
+            "female": "female vocalist",
+            "male": "male vocalist",
+        }
+        replacement = replacements.get(word.lower())
+        if not replacement:
+            return word
+
+        if word.isupper():
+            return replacement.upper()
+        if word[0].isupper():
+            return replacement.capitalize()
+        return replacement
+
+    gender_pattern = re.compile(r"\b(female|male)\b(?!\s+(vocal|voice|singer))", re.IGNORECASE)
+    return gender_pattern.sub(replace_gender, prompt_text)
+
+
 def compose_description_from_params(params: Dict[str, Any]) -> str:
     """Compose the textual description used during batch generation."""
     extra_prompt = (params.get('extra_prompt') or "").strip()
@@ -109,14 +166,17 @@ def compose_description_from_params(params: Dict[str, Any]) -> str:
     base_components: List[str] = []
 
     if include_dropdown and not force_extra_prompt:
-        attribute_values = [
-            params.get('gender'),
-            params.get('timbre'),
-            params.get('genre'),
-            params.get('emotion'),
-            params.get('instrument'),
-        ]
-        attribute_parts = [str(value).strip() for value in attribute_values if value]
+        attribute_parts: List[str] = []
+        for attr_type, attr_value in [
+            ("gender", params.get('gender')),
+            ("timbre", params.get('timbre')),
+            ("genre", params.get('genre')),
+            ("emotion", params.get('emotion')),
+            ("instrument", params.get('instrument')),
+        ]:
+            formatted = _format_attribute_for_prompt(attr_type, attr_value)
+            if formatted:
+                attribute_parts.append(formatted)
 
         bpm_value = params.get('bpm')
         if bpm_value is not None and str(bpm_value).strip():
@@ -140,7 +200,7 @@ def compose_description_from_params(params: Dict[str, Any]) -> str:
     if "[Musicality-very-high]" not in base_text:
         base_text = f"[Musicality-very-high], {base_text}"
 
-    return base_text
+    return _enhance_prompt_text(base_text)
 
 
 class CancellationToken:
