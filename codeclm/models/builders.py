@@ -99,6 +99,7 @@ def get_lm_model(cfg: omegaconf.DictConfig): #-> LMModel:
 
 def get_conditioner_provider(output_dim: int, cfg: omegaconf.DictConfig) -> ConditionerProvider:
     """Instantiate a conditioning model."""    
+    import os
     cfg = getattr(cfg, 'conditioners')
     dict_cfg = {} if cfg is None else dict_from_config(cfg)
     conditioners: tp.Dict[str, BaseConditioner] = {}
@@ -107,6 +108,15 @@ def get_conditioner_provider(output_dim: int, cfg: omegaconf.DictConfig) -> Cond
     for cond, cond_cfg in dict_cfg.items():
         model_type = cond_cfg['model']
         model_args = cond_cfg[model_type]
+        # Resolve token_path to absolute path if it exists
+        if 'token_path' in model_args:
+            token_path = model_args['token_path']
+            if not os.path.isabs(token_path):
+                # Convert relative path to absolute path
+                token_path = os.path.abspath(token_path)
+                model_args = dict(model_args)  # Make a copy to avoid modifying the original
+                model_args['token_path'] = token_path
+        
         if model_type == 'QwTokenizer':
             conditioners[str(cond)] = QwTokenizerConditioner(
                 output_dim=output_dim,
