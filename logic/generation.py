@@ -2,12 +2,103 @@ import os
 import os.path
 import time
 import random
+import re
+import yaml
 import numpy as np
 import torch
 import scipy.io.wavfile as wavfile
 from datetime import datetime
 from typing import Dict, Any, Optional, Tuple, List
 import threading
+
+APP_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+_VOCAB_PATH = os.path.join(APP_ROOT, 'conf', 'vocab.yaml')
+_DEFAULT_STRUCTURES = [
+    '[verse]', '[chorus]', '[bridge]',
+    '[intro-short]', '[intro-medium]', '[intro-long]',
+    '[inst-short]', '[inst-medium]', '[inst-long]',
+    '[outro-short]', '[outro-medium]', '[outro-long]',
+    '[silence]'
+]
+_VOCAL_STRUCTURES = {'[verse]', '[chorus]', '[bridge]'}
+_INSTRUMENTAL_ALIASES = {'[instrumental]'}
+_STRUCTURE_REPLACEMENTS = {
+    '[intro]': '[intro-short]',
+    '[inst]': '[inst-short]',
+    '[outro]': '[outro-short]'
+}
+_SANITIZE_PATTERN = re.compile(r"[^\w\s\[\]\-\u4e00-\u9fff\u3040-\u309f\u30a0-\u30ff\uac00-\ud7af\u00c0-\u017f]")
+_VALID_STRUCTURES_CACHE: Optional[List[str]] = None
+
+
+def _load_valid_structures() -> List[str]:
+    global _VALID_STRUCTURES_CACHE
+    if _VALID_STRUCTURES_CACHE is None:
+        try:
+            with open(_VOCAB_PATH, 'r', encoding='utf-8') as f:
+                data = yaml.safe_load(f)
+                if isinstance(data, list) and data:
+                    _VALID_STRUCTURES_CACHE = data
+                else:
+                    _VALID_STRUCTURES_CACHE = _DEFAULT_STRUCTURES
+        except Exception:
+            _VALID_STRUCTURES_CACHE = _DEFAULT_STRUCTURES
+    return _VALID_STRUCTURES_CACHE
+
+
+def normalize_lyrics(lyrics: str) -> str:
+    """Normalize lyrics to the model's expected format with validation."""
+    if not lyrics or not lyrics.strip():
+        raise ValueError("Lyrics cannot be empty")
+
+    normalized_text = lyrics
+    for src, dst in _STRUCTURE_REPLACEMENTS.items():
+        normalized_text = re.sub(re.escape(src), dst, normalized_text, flags=re.IGNORECASE)
+
+    paragraphs = [p.strip() for p in normalized_text.strip().split('\n\n') if p.strip()]
+    if not paragraphs:
+        raise ValueError("No valid paragraphs found")
+
+    valid_tags_lower = {tag.lower() for tag in _load_valid_structures()}
+    valid_tags_lower.update(_INSTRUMENTAL_ALIASES)
+    vocal_tags_lower = {tag.lower() for tag in _VOCAL_STRUCTURES}
+
+    normalized_parts: List[str] = []
+    has_vocal = False
+
+    for para in paragraphs:
+        lines = [line.strip() for line in para.splitlines() if line.strip()]
+        if not lines:
+            continue
+
+        struct_tag = lines[0].lower()
+        if struct_tag not in valid_tags_lower:
+            all_tags = _load_valid_structures() + list(_INSTRUMENTAL_ALIASES)
+            raise ValueError(f"Invalid structure tag: {struct_tag}. Valid tags: {', '.join(all_tags)}")
+
+        if struct_tag in vocal_tags_lower:
+            has_vocal = True
+            cleaned_lines = []
+            for line in lines[1:]:
+                cleaned = _SANITIZE_PATTERN.sub("", line).strip()
+                if cleaned:
+                    cleaned_lines.append(cleaned)
+            if not cleaned_lines:
+                raise ValueError(f"Structure {struct_tag} requires lyrics but none found")
+            normalized_parts.append(f"{struct_tag} {'.'.join(cleaned_lines)}")
+        else:
+            if any(line.strip() for line in lines[1:]):
+                raise ValueError(f"Structure {struct_tag} should not contain lyrics")
+            normalized_parts.append(struct_tag)
+
+    if not normalized_parts:
+        raise ValueError("No valid paragraphs found")
+
+    if not has_vocal:
+        raise ValueError(f"Lyrics must contain at least one vocal structure: {', '.join(sorted(_VOCAL_STRUCTURES))}")
+
+    return " ; ".join(normalized_parts)
+
 
 class CancellationToken:
     """Thread-safe cancellation token for stopping generation"""
@@ -144,31 +235,7 @@ def get_next_file_number(output_dir):
 
 def format_lyrics_for_model(lyrics):
     """Format lyrics according to the model's expected format"""
-    # The model expects: "[struct] lyrics ; [struct] lyrics"
-    paragraphs = [p.strip() for p in lyrics.strip().split('\n\n') if p.strip()]
-    formatted_parts = []
-    
-    for para in paragraphs:
-        lines = [line.strip() for line in para.splitlines() if line.strip()]
-        if not lines:
-            continue
-            
-        struct_tag = lines[0].lower()
-        
-        # Handle sections with lyrics
-        if struct_tag in ['[verse]', '[chorus]', '[bridge]']:
-            if len(lines) > 1:
-                # Join all lyric lines with periods
-                lyric_text = '. '.join(lines[1:])
-                formatted_parts.append(f"{struct_tag} {lyric_text}")
-            else:
-                formatted_parts.append(struct_tag)
-        else:
-            # Instrumental sections don't have lyrics
-            formatted_parts.append(struct_tag)
-    
-    formatted_lyrics = " ; ".join(formatted_parts)
-    return formatted_lyrics
+    return normalize_lyrics(lyrics)
 
 def generate_single_song(model, params, progress_tracker=None, cancellation_token=None):
     """Generate a single song with the given parameters"""
@@ -188,7 +255,10 @@ def generate_single_song(model, params, progress_tracker=None, cancellation_toke
     set_seed(used_seed)
     
     # Format lyrics
-    formatted_lyrics = format_lyrics_for_model(params['lyrics'])
+    try:
+        formatted_lyrics = normalize_lyrics(params['lyrics'])
+    except ValueError as exc:
+        raise ValueError(f"Lyrics validation failed: {exc}") from exc
     
     # Prepare generation parameters
     # Convert steps to duration (25 steps per second)
@@ -221,22 +291,20 @@ def generate_single_song(model, params, progress_tracker=None, cancellation_toke
     
     # Call the model
     # Build description string with extra prompt support
-    if params.get('force_extra_prompt'):
-        # Force mode: use only the extra prompt, ignore dropdowns
-        if params.get('extra_prompt', '').strip():
-            description = params['extra_prompt'].strip()
-        else:
-            # Warning: force mode enabled but no extra prompt provided
-            print("⚠️ Warning: 'force_extra_prompt' is True but no extra prompt was provided!")
-            print("Using minimal description for generation...")
-            description = "music"  # Minimal fallback description
+    extra_prompt_text = params.get('extra_prompt', '')
+    user_description = extra_prompt_text.strip() if isinstance(extra_prompt_text, str) else ""
+
+    if params.get('force_extra_prompt') and not user_description:
+        print("⚠️ Warning: 'force_extra_prompt' is True but no extra prompt was provided!")
+        print("Using fallback placeholder for description...")
+
+    if not user_description:
+        user_description = "."
+
+    if "[Musicality-very-high]" not in user_description:
+        description = f"[Musicality-very-high], {user_description}"
     else:
-        # Normal mode: use dropdown values with optional extra prompt
-        base_description = f"{params['gender']}, {params['timbre']}, {params['genre']}, {params['emotion']}, {params['instrument']}"
-        if params.get('extra_prompt', '').strip():
-            description = f"{base_description}, {params['extra_prompt'].strip()}"
-        else:
-            description = base_description
+        description = user_description
     
     # Use audio path if provided
     audio_path = params.get('audio_path', None)

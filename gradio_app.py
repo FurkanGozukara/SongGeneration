@@ -4,10 +4,10 @@ import json
 from datetime import datetime
 import yaml
 import time
-import re
 import os.path as op
 import os
 import scipy.io.wavfile as wavfile
+import soundfile as sf
 import subprocess
 import platform
 from PIL import Image
@@ -297,65 +297,13 @@ def load_options(filename):
         return sorted(options)  # Sort alphabetically
 
 # Load vocabulary structures for validation
-def load_vocab_structures():
-    """Load valid structure tags from vocabulary file"""
-    try:
-        vocab_path = op.join(APP_DIR, 'conf', 'vocab.yaml')
-        with open(vocab_path, 'r', encoding='utf-8') as f:
-            import yaml
-            structures = yaml.safe_load(f)
-            return structures if structures else []
-    except Exception as e:
-        print(f"Warning: Could not load vocab.yaml: {e}")
-        # Return default structures
-        return ['[verse]', '[chorus]', '[bridge]', '[intro-short]', '[intro-medium]', 
-                '[intro-long]', '[outro-short]', '[outro-medium]', '[outro-long]',
-                '[inst-short]', '[inst-medium]', '[inst-long]', '[silence]']
-
 def validate_lyrics_structure(lyrics):
-    """Validate lyrics structure against vocabulary"""
-    valid_structures = load_vocab_structures()
-    vocal_structures = ['[verse]', '[chorus]', '[bridge]']
-
-    # Add aliases for instrumental sections
-    instrumental_aliases = ['[instrumental]']
-
-    if not lyrics or not lyrics.strip():
-        return False, "Lyrics cannot be empty"
-
-    # Split into paragraphs
-    paragraphs = [p.strip() for p in lyrics.strip().split('\n\n') if p.strip()]
-    if not paragraphs:
-        return False, "No valid paragraphs found"
-
-    has_vocal_structure = False
-
-    for para in paragraphs:
-        lines = para.splitlines()
-        if not lines:
-            continue
-
-        struct_tag = lines[0].strip().lower()
-
-        # Check if structure tag is valid (including instrumental aliases)
-        valid_tags_lower = [s.lower() for s in valid_structures] + instrumental_aliases
-        if struct_tag not in valid_tags_lower:
-            return False, f"Invalid structure tag: {struct_tag}. Valid tags: {', '.join(valid_structures + instrumental_aliases)}"
-
-        # Check if vocal structures have lyrics
-        if struct_tag in [s.lower() for s in vocal_structures]:
-            has_vocal_structure = True
-            if len(lines) < 2 or not any(line.strip() for line in lines[1:]):
-                return False, f"Structure {struct_tag} requires lyrics but none found"
-        else:
-            # Non-vocal structures should not have lyrics
-            if len(lines) > 1 and any(line.strip() for line in lines[1:]):
-                return False, f"Structure {struct_tag} should not contain lyrics"
-
-    if not has_vocal_structure:
-        return False, f"Lyrics must contain at least one vocal structure: {', '.join(vocal_structures)}"
-
-    return True, "Lyrics structure is valid"
+    """Validate and normalize lyrics structure against vocabulary"""
+    try:
+        normalized = format_lyrics_for_model(lyrics)
+    except ValueError as exc:
+        return False, str(exc), None
+    return True, "Lyrics structure is valid", normalized
 
 GENRES = load_options('genre.txt')
 INSTRUMENTS = load_options('instrument.txt')
@@ -809,7 +757,7 @@ def submit_lyrics(
     progress_callback = create_progress_callback(gradio_progress_tracker, progress)
     
     # Validate lyrics structure first
-    is_valid, validation_message = validate_lyrics_structure(lyrics)
+    is_valid, validation_message, normalized_lyrics = validate_lyrics_structure(lyrics)
     if not is_valid:
         error_msg = f"Lyrics validation failed: {validation_message}"
         print(f"❌ ERROR: {error_msg}")
@@ -818,6 +766,15 @@ def submit_lyrics(
         return
     
     output_messages(f"✓ Lyrics structure validation passed")
+    lyrics = normalized_lyrics
+
+    def build_description_text(text_value: str) -> str:
+        cleaned = text_value.strip() if isinstance(text_value, str) else ""
+        if not cleaned:
+            cleaned = "."
+        if "[Musicality-very-high]" not in cleaned:
+            return f"[Musicality-very-high], {cleaned}"
+        return cleaned
     
     # Limit lyrics length to prevent exceeding token limit
     # Get current model's character limit
@@ -841,31 +798,7 @@ def submit_lyrics(
     set_seed(used_seed)
     output_messages(f"Using seed: {used_seed}")
     
-    # Format lyrics according to the model's expected format
-    # The model expects: "[struct] lyrics ; [struct] lyrics"
-    paragraphs = [p.strip() for p in lyrics.strip().split('\n\n') if p.strip()]
-    formatted_parts = []
-    
-    for para in paragraphs:
-        lines = [line.strip() for line in para.splitlines() if line.strip()]
-        if not lines:
-            continue
-            
-        struct_tag = lines[0].lower()
-        
-        # Handle sections with lyrics
-        if struct_tag in ['[verse]', '[chorus]', '[bridge]']:
-            if len(lines) > 1:
-                # Join all lyric lines with periods
-                lyric_text = '. '.join(lines[1:])
-                formatted_parts.append(f"{struct_tag} {lyric_text}")
-            else:
-                formatted_parts.append(struct_tag)
-        else:
-            # Instrumental sections don't have lyrics
-            formatted_parts.append(struct_tag)
-    
-    formatted_lyrics = " ; ".join(formatted_parts)
+    formatted_lyrics = lyrics
     
     current_time = datetime.now().strftime("%Y%m%d_%H%M%S")
     
@@ -945,31 +878,19 @@ def submit_lyrics(
             # Use progress interceptor to capture tqdm output
             with intercept_progress(progress_callback):
                 # Build description string with extra prompt
-                if force_extra_prompt:
-                    # Force mode: use only the extra prompt, ignore dropdowns
-                    if extra_prompt and extra_prompt.strip():
-                        full_description = extra_prompt.strip()
-                        print("\n" + "="*80)
-                        print("FORCE EXTRA PROMPT MODE - Ignoring dropdown selections")
-                        print("="*80)
-                    else:
-                        # Warning: force mode enabled but no extra prompt provided
-                        output_messages("⚠️ Warning: 'Use only extra prompt' is enabled but no extra prompt was provided!")
-                        output_messages("Using minimal description for generation...")
-                        full_description = "music"  # Minimal fallback description
-                else:
-                    # Normal mode: use dropdown values with optional extra prompt
-                    base_description = f"{current_gender}, {current_timbre}, {current_genre}, {current_emotion}, {current_instrument}, the bpm is {bpm}"
-                    if extra_prompt and extra_prompt.strip():
-                        full_description = f"{base_description}, {extra_prompt.strip()}"
-                    else:
-                        full_description = base_description
+                extra_prompt_text = extra_prompt.strip() if extra_prompt and isinstance(extra_prompt, str) else ""
+
+                if force_extra_prompt and not extra_prompt_text:
+                    output_messages("⚠️ Warning: 'Use only extra prompt' is enabled but no extra description was provided!")
+                    output_messages("Using fallback placeholder for description...")
+
+                description_for_model = build_description_text(extra_prompt_text)
                 
                 # Print final prompt to console
                 print("\n" + "="*80)
                 print("GENERATING SONG WITH PROMPT:")
                 print("="*80)
-                print(f"Description: {full_description}")
+                print(f"Description: {description_for_model}")
                 if song_data["sample_prompt"] and song_data["audio_path"]:
                     print(f"Using reference audio for consistent voice")
                 print("="*80 + "\n")
@@ -977,7 +898,7 @@ def submit_lyrics(
                 # Prepare generation input based on new format
                 generate_input = {
                     'lyrics': [song_data["lyrics"]],
-                    'descriptions': [full_description],
+                    'descriptions': [description_for_model],
                     'melody_wavs': song_data["pmt_wav"],
                     'vocal_wavs': song_data["vocal_wav"],
                     'bgm_wavs': song_data["bgm_wav"],
@@ -987,7 +908,7 @@ def submit_lyrics(
                 # Call model with correct interface matching original
                 audio_data = MODEL(
                     lyric=song_data["lyrics"],
-                    description=full_description,
+                    description=description_for_model,
                     prompt_audio_path=None,  # We handle audio processing separately
                     genre=song_data["auto_prompt_type"] if song_data["auto_prompt_type"] else None,
                     auto_prompt_path=auto_prompt_manager.get_fallback_prompt_path(),
@@ -1151,20 +1072,8 @@ def submit_lyrics(
             # When loop_presets is False: skip first generation if we already generated above
             should_generate = loop_presets or (not loop_presets and (preset_name is not None or gen_idx > 0))
             
-            # Build description string (needed even if we skip generation for separate tracks)
-            if force_extra_prompt:
-                # Force mode: use only the extra prompt, ignore dropdowns
-                if extra_prompt and extra_prompt.strip():
-                    full_description = extra_prompt.strip()
-                else:
-                    full_description = "music"  # Minimal fallback description
-            else:
-                # Normal mode: use dropdown values with optional extra prompt
-                base_description = f"{current_gender}, {current_timbre}, {current_genre}, {current_emotion}, {current_instrument}, the bpm is {bpm}"
-                if extra_prompt and extra_prompt.strip():
-                    full_description = f"{base_description}, {extra_prompt.strip()}"
-                else:
-                    full_description = base_description
+            # Build model description based on optional extra prompt
+            generation_description = build_description_text(extra_prompt.strip() if extra_prompt else "")
             
             if should_generate:
                 try:
@@ -1179,7 +1088,7 @@ def submit_lyrics(
                         print("\n" + "="*80)
                         print(f"GENERATING SONG {generation_count}/{total_generations} WITH PROMPT:")
                         print("="*80)
-                        print(f"Description: {full_description}")
+                        print(f"Description: {generation_description}")
                         if preset_name:
                             print(f"Preset: {preset_name}")
                         if song_data["sample_prompt"] and song_data["audio_path"]:
@@ -1188,7 +1097,7 @@ def submit_lyrics(
                         
                         audio_data = MODEL(
                             song_data["lyrics"], 
-                            full_description,
+                            generation_description,
                             song_data["audio_path"] if song_data["sample_prompt"] else None,
                             None,
                             op.join(APP_DIR, "ckpt/prompt.pt"),
@@ -1227,7 +1136,7 @@ def submit_lyrics(
                         print("Generating separate vocal track...")
                         vocal_audio_data = MODEL(
                             lyric=song_data["lyrics"],
-                            description=full_description,
+                            description=generation_description,
                             prompt_audio_path=None,
                             genre=song_data["auto_prompt_type"] if song_data["auto_prompt_type"] else None,
                             auto_prompt_path=auto_prompt_manager.get_fallback_prompt_path(),
@@ -1241,7 +1150,7 @@ def submit_lyrics(
                         print("Generating separate BGM track...")
                         bgm_audio_data = MODEL(
                             lyric=song_data["lyrics"],
-                            description=full_description,
+                            description=generation_description,
                             prompt_audio_path=None,
                             genre=song_data["auto_prompt_type"] if song_data["auto_prompt_type"] else None,
                             auto_prompt_path=auto_prompt_manager.get_fallback_prompt_path(),
@@ -1291,11 +1200,7 @@ def submit_lyrics(
                 
                 # Save FLAC (original format)
                 try:
-                    import torchaudio
-                    audio_tensor = torch.from_numpy(audio_data).float()
-                    if audio_tensor.dim() == 1:
-                        audio_tensor = audio_tensor.unsqueeze(0)
-                    torchaudio.save(flac_path, audio_tensor, MODEL.cfg.sample_rate, format="flac")
+                    sf.write(flac_path, audio_data, MODEL.cfg.sample_rate, format="FLAC")
                     output_messages(f"✓ FLAC saved: {base_filename}.flac")
                 except Exception as e:
                     print(f"Warning: Could not save FLAC: {e}")
@@ -1729,9 +1634,9 @@ with gr.Blocks(title="SECourses LeVo Song Generation App",theme=gr.themes.Soft()
                             label="Temperature",
                             minimum=0.1,
                             maximum=2.0,
-                            value=1.0,
+                            value=0.8,
                             step=0.1,
-                            info="Sampling temperature. 1.0 = balanced (default for Large model), <1.0 = more focused, >1.0 = more creative"
+                            info="Sampling temperature. 0.8 = recommended (official default), <0.8 = more focused, >1.0 = more creative"
                         )
                         top_k = gr.Slider(
                             label="Top-k Sampling",
@@ -2003,55 +1908,47 @@ with gr.Blocks(title="SECourses LeVo Song Generation App",theme=gr.themes.Soft()
                     """)
     
     # Add character counter and duration estimator for lyrics
-    def update_char_count_and_duration(text):
+    def update_char_count_and_duration(text, max_generation_steps):
         char_count = len(text) if text else 0
 
         # Get current model limits (default to Large model capacity if not loaded)
         current_model_max = MAX_GENERATION_LENGTHS.get(MODEL_VERSION, 6750) if MODEL_VERSION else 6750
+        if current_model_max <= 0:
+            current_model_max = 6750
+
         # Approximate character limit (rough estimate: ~6.5 chars per token)
-        # Large model (6750 steps = 270s) can handle significantly more content
-        max_chars = int((current_model_max / 25.0) * 6.5 * 300 / 3750 * 1500)  # Scale based on model capacity
+        max_chars = int((current_model_max / 25.0) * 6.5 * 300 / 3750 * 1500)
         max_chars = min(max_chars, 5000)  # Cap at reasonable limit (increased for Large model)
 
-        # Estimate duration based on structure tags
-        duration_seconds = 0
-        if text:
-            text_lower = text.lower()
-            # Count instrumental sections
-            duration_seconds += text_lower.count('[intro-short]') * 5
-            duration_seconds += text_lower.count('[intro-medium]') * 15
-            duration_seconds += text_lower.count('[intro-long]') * 25
-            duration_seconds += text_lower.count('[inst-short]') * 5
-            duration_seconds += text_lower.count('[inst-medium]') * 15
-            duration_seconds += text_lower.count('[inst-long]') * 25
-            duration_seconds += text_lower.count('[outro-short]') * 5
-            duration_seconds += text_lower.count('[outro-medium]') * 15
-            duration_seconds += text_lower.count('[outro-long]') * 25
-            duration_seconds += text_lower.count('[silence]') * 2
+        # Determine target generation steps (25 steps ≈ 1 second in pipeline)
+        fallback_steps = min(4500, current_model_max)
+        try:
+            requested_steps = float(max_generation_steps) if max_generation_steps is not None else fallback_steps
+        except (TypeError, ValueError):
+            requested_steps = fallback_steps
 
-            # Estimate duration for sections with lyrics (verse, chorus, bridge)
-            # Count lines for each section type
-            import re
-            verses = re.findall(r'\[verse\](.*?)(?=\[|$)', text_lower, re.DOTALL)
-            choruses = re.findall(r'\[chorus\](.*?)(?=\[|$)', text_lower, re.DOTALL)
-            bridges = re.findall(r'\[bridge\](.*?)(?=\[|$)', text_lower, re.DOTALL)
+        if requested_steps <= 0:
+            requested_steps = fallback_steps
 
-            # Approximate 3 seconds per line for verses/bridges, 2.5 for choruses
-            for verse in verses:
-                lines = len([l for l in verse.strip().split('\n') if l.strip()])
-                duration_seconds += lines * 3
-            for chorus in choruses:
-                lines = len([l for l in chorus.strip().split('\n') if l.strip()])
-                duration_seconds += lines * 2.5
-            for bridge in bridges:
-                lines = len([l for l in bridge.strip().split('\n') if l.strip()])
-                duration_seconds += lines * 3
+        requested_steps = max(requested_steps, 0.0)
+        effective_steps = min(int(round(requested_steps)), int(current_model_max))
 
-        # Format duration
-        if duration_seconds > 0:
-            minutes = int(duration_seconds // 60)
-            seconds = int(duration_seconds % 60)
-            duration_str = f" | Estimated duration: {minutes}:{seconds:02d}"
+        # Convert steps to duration (actual pipeline uses steps / 25.0 seconds)
+        if effective_steps > 0:
+            duration_seconds = effective_steps / 25.0
+            total_seconds = int(round(duration_seconds))
+            minutes, seconds = divmod(total_seconds, 60)
+
+            max_total_seconds = int(round(current_model_max / 25.0))
+            max_minutes, max_seconds = divmod(max_total_seconds, 60)
+
+            duration_str = (
+                f" | Estimated duration: {minutes}:{seconds:02d} "
+                f"({effective_steps} steps, max {max_minutes}:{max_seconds:02d})"
+            )
+
+            if requested_steps > current_model_max:
+                duration_str += " ⚠️ capped by model"
         else:
             duration_str = " | Estimated duration: 0:00"
 
@@ -2062,11 +1959,25 @@ with gr.Blocks(title="SECourses LeVo Song Generation App",theme=gr.themes.Soft()
             return f"⚠️ {char_count}/{max_chars} characters{duration_str}"
         else:
             return f"{char_count}/{max_chars} characters{duration_str}"
-    
-    lyrics.change(fn=update_char_count_and_duration, inputs=[lyrics], outputs=[char_counter])
-    
-    # Initialize character counter with default lyrics
-    demo.load(fn=update_char_count_and_duration, inputs=[lyrics], outputs=[char_counter])
+
+    lyrics.change(
+        fn=update_char_count_and_duration,
+        inputs=[lyrics, max_gen_length],
+        outputs=[char_counter]
+    )
+
+    max_gen_length.change(
+        fn=update_char_count_and_duration,
+        inputs=[lyrics, max_gen_length],
+        outputs=[char_counter]
+    )
+
+    # Initialize character counter with default lyrics and generation length
+    demo.load(
+        fn=update_char_count_and_duration,
+        inputs=[lyrics, max_gen_length],
+        outputs=[char_counter]
+    )
     
     # Preset functionality
     def handle_save_preset(preset_name, current_preset, *args):
@@ -2179,7 +2090,7 @@ with gr.Blocks(title="SECourses LeVo Song Generation App",theme=gr.themes.Soft()
             'randomize_params': False,
             'max_gen_length': 4500,  # Default to 3 minutes for Large model
             'diffusion_steps': 50,
-            'temperature': 1.0,
+            'temperature': 0.8,
             'top_k': 50,
             'top_p': 0.0,
             'cfg_coef': 1.5,

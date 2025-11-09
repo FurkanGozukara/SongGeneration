@@ -4,6 +4,7 @@ import sys
 import torch
 
 import json
+import re
 import numpy as np
 from omegaconf import OmegaConf
 
@@ -51,7 +52,7 @@ class LeVoInference(torch.nn.Module):
 
         self.default_params = dict(
             cfg_coef = 1.5,
-            temperature = 1.0,
+            temperature = 0.8,
             top_k = 50,
             top_p = 0.0,
             record_tokens = True,
@@ -62,6 +63,21 @@ class LeVoInference(torch.nn.Module):
 
         self.model.set_generation_params(**self.default_params)
 
+    def _detect_language(self, text: str) -> str:
+        """Approximate lyric language detection for auto prompt routing."""
+        if not text:
+            return "en"
+        chinese_count = len(re.findall(r'[\u4e00-\u9fff]', text))
+        english_count = len(re.findall(r'[a-zA-Z]', text))
+        total = chinese_count + english_count
+        if total == 0:
+            return "en"
+        if chinese_count / total >= 0.2:
+            return "zh"
+        if english_count / total >= 0.5:
+            return "en"
+        return "en"
+
     def forward(self, lyric: str, description: str = None, prompt_audio_path: os.PathLike = None, genre: str = None, auto_prompt_path: os.PathLike = None, gen_type: str = "mixed", params = dict()):
         params = {**self.default_params, **params}
         self.model.set_generation_params(**params)
@@ -71,20 +87,54 @@ class LeVoInference(torch.nn.Module):
             melody_is_wav = True
         elif genre is not None and auto_prompt_path is not None:
             auto_prompt = torch.load(auto_prompt_path)
-            merge_prompt = [item for sublist in auto_prompt.values() for item in sublist]
-            if genre == "Auto": 
-                prompt_token = merge_prompt[np.random.randint(0, len(merge_prompt))]
+            prompt_token = None
+
+            if genre == "Auto":
+                auto_section = auto_prompt.get('Auto') if isinstance(auto_prompt, dict) else None
+                if isinstance(auto_section, dict):
+                    lang = self._detect_language(lyric)
+                    lang_prompts = auto_section.get(lang)
+                    if isinstance(lang_prompts, list) and lang_prompts:
+                        prompt_token = lang_prompts[np.random.randint(0, len(lang_prompts))]
+
+                if prompt_token is None:
+                    if isinstance(auto_prompt, dict):
+                        merge_prompt = []
+                        for value in auto_prompt.values():
+                            if isinstance(value, list):
+                                merge_prompt.extend(value)
+                            elif value is not None:
+                                merge_prompt.append(value)
+                    else:
+                        merge_prompt = list(auto_prompt) if isinstance(auto_prompt, list) else []
+                    if merge_prompt:
+                        prompt_token = merge_prompt[np.random.randint(0, len(merge_prompt))]
+            elif isinstance(auto_prompt, dict) and genre in auto_prompt:
+                genre_prompts = auto_prompt[genre]
+                if isinstance(genre_prompts, list) and genre_prompts:
+                    prompt_token = genre_prompts[np.random.randint(0, len(genre_prompts))]
+                else:
+                    prompt_token = genre_prompts
+
+            if prompt_token is not None:
+                pmt_wav = prompt_token[:,[0],:]
+                vocal_wav = prompt_token[:,[1],:]
+                bgm_wav = prompt_token[:,[2],:]
+                melody_is_wav = False
             else:
-                prompt_token = auto_prompt[genre][np.random.randint(0, len(auto_prompt[genre]))]
-            pmt_wav = prompt_token[:,[0],:]
-            vocal_wav = prompt_token[:,[1],:]
-            bgm_wav = prompt_token[:,[2],:]
-            melody_is_wav = False
+                pmt_wav = None
+                vocal_wav = None
+                bgm_wav = None
+                melody_is_wav = True
         else:
             pmt_wav = None
             vocal_wav = None
             bgm_wav = None
             melody_is_wav = True
+
+        description = description if description else "."
+        if "[Musicality-very-high]" not in description:
+            description = f"[Musicality-very-high], {description}"
 
         generate_inp = {
             'lyrics': [lyric.replace("  ", " ")],
