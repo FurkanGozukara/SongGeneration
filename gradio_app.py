@@ -895,26 +895,14 @@ def process_reference_audio(audio_path, auto_prompt_enabled, auto_prompt_type, g
         gen_type: Generation type (mixed, vocal, bgm, separate)
         
     Returns:
-        Tuple of (pmt_wav, vocal_wav, bgm_wav, use_audio, status_message)
+        Tuple of (pmt_wav, vocal_wav, bgm_wav, use_audio, status_message, processed_audio_path)
     """
-    # Handle auto prompt audio
-    if auto_prompt_enabled and auto_prompt_manager.is_available():
-        try:
-            prompt_tokens = auto_prompt_manager.get_auto_prompt_tokens(auto_prompt_type)
-            if prompt_tokens:
-                pmt_wav, vocal_wav, bgm_wav = prompt_tokens
-                return pmt_wav, vocal_wav, bgm_wav, True, f"✓ Using auto prompt: {auto_prompt_type}"
-            else:
-                return None, None, None, False, f"⚠️ Auto prompt '{auto_prompt_type}' not available"
-        except Exception as e:
-            return None, None, None, False, f"⚠️ Auto prompt error: {str(e)}"
-    
-    # Handle uploaded reference audio
+    # Handle uploaded reference audio first (manual reference takes priority)
     if audio_path:
         try:
             validated_path, error_msg = validate_audio_file(audio_path, use_separation=True)
             if error_msg:
-                return None, None, None, False, f"⚠️ Audio validation failed: {error_msg}"
+                return None, None, None, False, f"⚠️ Audio validation failed: {error_msg}", None
             
             # Use audio separator for processing
             if audio_separator.is_available():
@@ -928,9 +916,9 @@ def process_reference_audio(audio_path, auto_prompt_enabled, auto_prompt_type, g
                     if bgm_audio.dim() == 2:
                         bgm_audio = bgm_audio[None]
                     
-                    return full_audio, vocal_audio, bgm_audio, True, "✓ Reference audio processed with separation"
+                    return full_audio, vocal_audio, bgm_audio, True, "✓ Reference audio processed with separation", validated_path
                 else:
-                    return None, None, None, False, "⚠️ Audio separation failed"
+                    return None, None, None, False, "⚠️ Audio separation failed", None
             else:
                 # Fallback: use original audio without separation
                 import torchaudio
@@ -942,13 +930,25 @@ def process_reference_audio(audio_path, auto_prompt_enabled, auto_prompt_type, g
                 if audio.dim() == 2:
                     audio = audio[None]
                 
-                return audio, audio, audio, True, "✓ Reference audio loaded (no separation available)"
+                return audio, audio, audio, True, "✓ Reference audio loaded (no separation available)", validated_path
                 
         except Exception as e:
-            return None, None, None, False, f"⚠️ Reference audio error: {str(e)}"
+            return None, None, None, False, f"⚠️ Reference audio error: {str(e)}", None
+    
+    # If no manual audio (or not provided), fall back to auto prompt if enabled
+    if auto_prompt_enabled and auto_prompt_manager.is_available():
+        try:
+            prompt_tokens = auto_prompt_manager.get_auto_prompt_tokens(auto_prompt_type)
+            if prompt_tokens:
+                pmt_wav, vocal_wav, bgm_wav = prompt_tokens
+                return pmt_wav, vocal_wav, bgm_wav, True, f"✓ Using auto prompt: {auto_prompt_type}", None
+            else:
+                return None, None, None, False, f"⚠️ Auto prompt '{auto_prompt_type}' not available", None
+        except Exception as e:
+            return None, None, None, False, f"⚠️ Auto prompt error: {str(e)}", None
     
     # No reference audio
-    return None, None, None, False, ""
+    return None, None, None, False, "", None
 
 def submit_lyrics(
     lyrics, struct, genre, instrument, bpm, emotion, timbre, gender, extra_prompt, include_dropdown_attributes, force_extra_prompt,
@@ -1016,7 +1016,7 @@ def submit_lyrics(
     current_time = datetime.now().strftime("%Y%m%d_%H%M%S")
     
     # Process reference audio (including auto prompt)
-    pmt_wav, vocal_wav, bgm_wav, use_audio, audio_status = process_reference_audio(
+    pmt_wav, vocal_wav, bgm_wav, use_audio, audio_status, processed_audio_path = process_reference_audio(
         audio_path, auto_prompt_enabled, auto_prompt_type, gen_type
     )
     
@@ -1053,11 +1053,12 @@ def submit_lyrics(
         "timbre": timbre,
         "gender": gender,
         "sample_prompt": use_audio,
-        "audio_path": audio_path,  # Store the audio path for reference
+        "audio_path": processed_audio_path if processed_audio_path else None,
+        "original_audio_path": audio_path,
         "pmt_wav": pmt_wav,
         "vocal_wav": vocal_wav,
         "bgm_wav": bgm_wav,
-        "melody_is_wav": not use_audio,  # True if no reference audio
+        "melody_is_wav": bool(processed_audio_path),
         "time": current_time,
         "gen_type": gen_type,
         "auto_prompt_type": auto_prompt_type if auto_prompt_enabled else None,
@@ -1149,7 +1150,7 @@ def submit_lyrics(
                 audio_data = MODEL(
                     lyric=song_data["lyrics"],
                     description=description_for_generation,
-                    prompt_audio_path=None,  # We handle audio processing separately
+                    prompt_audio_path=song_data["audio_path"],
                     genre=song_data["auto_prompt_type"] if song_data["auto_prompt_type"] else None,
                     auto_prompt_path=auto_prompt_manager.get_fallback_prompt_path(),
                     gen_type=song_data["gen_type"],
@@ -1387,7 +1388,7 @@ def submit_lyrics(
                         vocal_audio_data = MODEL(
                             lyric=song_data["lyrics"],
                             description=generation_description,
-                            prompt_audio_path=None,
+                            prompt_audio_path=song_data["audio_path"],
                             genre=song_data["auto_prompt_type"] if song_data["auto_prompt_type"] else None,
                             auto_prompt_path=auto_prompt_manager.get_fallback_prompt_path(),
                             gen_type='vocal',
@@ -1401,7 +1402,7 @@ def submit_lyrics(
                         bgm_audio_data = MODEL(
                             lyric=song_data["lyrics"],
                             description=generation_description,
-                            prompt_audio_path=None,
+                            prompt_audio_path=song_data["audio_path"],
                             genre=song_data["auto_prompt_type"] if song_data["auto_prompt_type"] else None,
                             auto_prompt_path=auto_prompt_manager.get_fallback_prompt_path(),
                             gen_type='bgm',
@@ -1567,7 +1568,7 @@ def submit_lyrics(
 
 # Create Gradio interface
 with gr.Blocks(title="SECourses LeVo Song Generation App",theme=gr.themes.Soft()) as demo:
-    gr.Markdown("# SECourses Premium LeVo Song Generator V7.1 - Up to 4m30s Songs - https://www.patreon.com/posts/135592123")
+    gr.Markdown("# SECourses Premium LeVo Song Generator V7.2 - Up to 4m30s Songs - https://www.patreon.com/posts/135592123")
     
     history = gr.State([])
     session = gr.State({})
