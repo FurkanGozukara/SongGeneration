@@ -80,6 +80,14 @@ MAX_GENERATION_LENGTHS = {
     'songgeneration_base_full': 6750,  # ~4m30s - GOOD QUALITY
 }
 
+DEFAULT_MAX_GENERATION_STEPS = max(MAX_GENERATION_LENGTHS.values())
+STEPS_PER_SECOND = 25.0
+MIN_GENERATION_STEPS = 2000
+DEFAULT_GENERATION_STEPS = 4500
+MIN_DURATION_SECONDS = int(MIN_GENERATION_STEPS / STEPS_PER_SECOND)
+DEFAULT_DURATION_SECONDS = int(DEFAULT_GENERATION_STEPS / STEPS_PER_SECOND)
+DURATION_SLIDER_UI_MIN = MIN_DURATION_SECONDS
+
 APP_DIR = op.dirname(op.abspath(__file__))
 
 # Parse command line arguments
@@ -158,6 +166,95 @@ disable_verbose_logging()
 MODEL = None
 # MODEL_VERSION is already defined above (line 74)
 CURRENT_MODEL_PATH = None
+
+def steps_to_seconds(steps_value):
+    """Convert generation steps to seconds using pipeline ratio."""
+    try:
+        return max(0.0, float(steps_value)) / STEPS_PER_SECOND
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def seconds_to_steps(seconds_value):
+    """Convert seconds to generation steps using pipeline ratio."""
+    try:
+        return max(0, int(round(float(seconds_value) * STEPS_PER_SECOND)))
+    except (TypeError, ValueError):
+        return 0
+
+
+def get_current_model_max_steps():
+    """Return the current model's maximum supported generation steps."""
+    if MODEL_VERSION and MODEL_VERSION in MAX_GENERATION_LENGTHS:
+        return MAX_GENERATION_LENGTHS[MODEL_VERSION]
+    if CURRENT_MODEL_PATH:
+        model_name = op.basename(CURRENT_MODEL_PATH)
+        return MAX_GENERATION_LENGTHS.get(model_name, DEFAULT_MAX_GENERATION_STEPS)
+    return DEFAULT_MAX_GENERATION_STEPS
+
+
+def clamp_steps_to_model(steps_value):
+    """Clamp step value to supported range for loaded model."""
+    max_steps = get_current_model_max_steps()
+    clamped_steps = max(MIN_GENERATION_STEPS, int(round(max(0, steps_value))))
+    return min(clamped_steps, max_steps)
+
+
+def clamp_duration_seconds(duration_value):
+    """Clamp duration (seconds) to supported range for loaded model."""
+    max_seconds = steps_to_seconds(get_current_model_max_steps())
+    min_seconds = MIN_DURATION_SECONDS
+    if max_seconds < min_seconds:
+        max_seconds = min_seconds
+    try:
+        duration = float(duration_value)
+    except (TypeError, ValueError):
+        duration = DEFAULT_DURATION_SECONDS
+    duration = max(float(min_seconds), duration)
+    return min(duration, max_seconds)
+
+
+def get_min_duration_seconds():
+    """Return smallest song duration allowed by pipeline in seconds."""
+    return int(round(steps_to_seconds(MIN_GENERATION_STEPS)))
+
+
+def format_duration_slider_info(max_steps):
+    """Generate user-facing info text for the duration slider."""
+    max_steps = max(MIN_GENERATION_STEPS, int(max_steps))
+    max_seconds = int(round(steps_to_seconds(max_steps)))
+    min_seconds = get_min_duration_seconds()
+    if max_seconds < min_seconds:
+        max_seconds = min_seconds
+    return (
+        "Controls generation duration in seconds (≈25 steps per second). "
+        f"Model range: {min_seconds}-{max_seconds}s. "
+        f"Values below {min_seconds}s snap to the minimum automatically."
+    )
+
+
+def create_duration_slider_update(step_value, max_steps):
+    """Helper to create a duration slider update synchronized with step slider."""
+    max_steps = max(MIN_GENERATION_STEPS, int(max_steps))
+    try:
+        requested_steps = int(round(float(step_value)))
+    except (TypeError, ValueError):
+        requested_steps = DEFAULT_GENERATION_STEPS
+    clamped_steps = max(MIN_GENERATION_STEPS, min(requested_steps, max_steps))
+    duration_value = int(round(steps_to_seconds(clamped_steps)))
+    duration_max = int(round(steps_to_seconds(max_steps)))
+    min_seconds = get_min_duration_seconds()
+    if duration_max < min_seconds:
+        min_seconds = duration_max
+    duration_value = max(min_seconds, min(duration_value, duration_max))
+    info_text = format_duration_slider_info(max_steps)
+    return gr.update(
+        value=duration_value,
+        minimum=DURATION_SLIDER_UI_MIN,
+        maximum=duration_max,
+        info=info_text
+    )
+
 
 # Initialize new systems
 audio_separator = AudioSeparator()
@@ -305,11 +402,70 @@ def validate_lyrics_structure(lyrics):
         return False, str(exc), None
     return True, "Lyrics structure is valid", normalized
 
-GENRES = load_options('genre.txt')
-INSTRUMENTS = load_options('instrument.txt')
-EMOTIONS = load_options('emotion.txt')
-TIMBRES = load_options('timbre.txt')
-GENDERS = load_options('gender.txt')
+def compose_generation_description(
+    extra_prompt: str,
+    include_dropdown_attributes: bool,
+    gender: str,
+    timbre: str,
+    genre: str,
+    emotion: str,
+    instrument: str,
+    bpm,
+    force_extra_prompt: bool,
+) -> str:
+    """Compose the textual description passed to the model."""
+    extra_text = (extra_prompt or "").strip()
+
+    base_components = []
+    use_dropdown = include_dropdown_attributes and not force_extra_prompt
+
+    if use_dropdown:
+        attribute_parts = []
+        for value in [gender, timbre, genre, emotion, instrument]:
+            text = str(value).strip() if value is not None else ""
+            if text.lower() == "none":
+                text = ""
+            if text:
+                attribute_parts.append(text)
+
+        if bpm is not None and str(bpm).strip():
+            try:
+                bpm_value = int(float(bpm))
+            except (TypeError, ValueError):
+                bpm_value = bpm
+            attribute_parts.append(f"the bpm is {bpm_value}")
+
+        if attribute_parts:
+            base_components.append(", ".join(attribute_parts))
+
+    if extra_text:
+        base_components.append(extra_text)
+
+    base_text = ", ".join(component for component in base_components if component).strip()
+
+    if not base_text or force_extra_prompt and not extra_text:
+        base_text = "."
+
+    if "[Musicality-very-high]" not in base_text:
+        base_text = f"[Musicality-very-high], {base_text}"
+
+    return base_text
+
+def format_description_preview(description: str) -> str:
+    """Format description preview text for display."""
+    return f"**Description Preview:** `{description}`"
+
+def add_none_option(options):
+    """Return a new list with 'None' prepended for optional selections."""
+    cleaned = [opt for opt in options if opt.lower() != "none"]
+    return ["None"] + cleaned
+
+
+GENRES = add_none_option(load_options('genre.txt'))
+INSTRUMENTS = add_none_option(load_options('instrument.txt'))
+EMOTIONS = add_none_option(load_options('emotion.txt'))
+TIMBRES = add_none_option(load_options('timbre.txt'))
+GENDERS = add_none_option(load_options('gender.txt'))
 
 # Preset directory
 PRESET_DIR = op.join(APP_DIR, 'presets')
@@ -320,9 +476,9 @@ preset_manager = PresetManager(PRESET_DIR)
 
 
 def collect_current_parameters(
-    lyrics, genre, instrument, bpm, emotion, timbre, gender, extra_prompt, force_extra_prompt,
+    lyrics, genre, instrument, bpm, emotion, timbre, gender, extra_prompt, include_dropdown_attributes, force_extra_prompt,
     audio_path, image_path, save_mp3, seed,
-    max_gen_length, diffusion_steps, temperature, top_k, top_p,
+    duration_seconds, max_gen_length, diffusion_steps, temperature, top_k, top_p,
     cfg_coef, guidance_scale, use_sampling, extend_stride,
     gen_type, chunked, chunk_size, record_tokens, record_window,
     disable_offload, disable_cache_clear, disable_fp16, disable_sequential,
@@ -338,11 +494,13 @@ def collect_current_parameters(
         'timbre': timbre,
         'gender': gender,
         'extra_prompt': extra_prompt,
+        'include_dropdown_attributes': include_dropdown_attributes,
         'force_extra_prompt': force_extra_prompt,
         'audio_path': audio_path,
         'image_path': image_path,
         'save_mp3': save_mp3,
         'seed': seed,
+        'duration_seconds': duration_seconds,
         'max_gen_length': max_gen_length,
         'diffusion_steps': diffusion_steps,
         'temperature': temperature,
@@ -474,9 +632,9 @@ def cancel_generation():
 
 def run_batch_processing(
     input_folder, output_folder, skip_existing, loop_presets, num_generations,
-    lyrics, genre, instrument, bpm, emotion, timbre, gender, extra_prompt, force_extra_prompt,
+    lyrics, genre, instrument, bpm, emotion, timbre, gender, extra_prompt, include_dropdown_attributes, force_extra_prompt,
     audio_path, image_path, save_mp3, seed,
-    max_gen_length, diffusion_steps, temperature, top_k, top_p,
+    duration_seconds, max_gen_length, diffusion_steps, temperature, top_k, top_p,
     cfg_coef, guidance_scale, use_sampling, extend_stride,
     gen_type, chunked, chunk_size, record_tokens, record_window,
     disable_offload, disable_cache_clear, disable_fp16, disable_sequential,
@@ -501,9 +659,9 @@ def run_batch_processing(
     
     # Collect base parameters
     base_params = collect_current_parameters(
-        lyrics, genre, instrument, bpm, emotion, timbre, gender, extra_prompt, force_extra_prompt,
+        lyrics, genre, instrument, bpm, emotion, timbre, gender, extra_prompt, include_dropdown_attributes, force_extra_prompt,
         audio_path, image_path, save_mp3, seed,
-        max_gen_length, diffusion_steps, temperature, top_k, top_p,
+        duration_seconds, max_gen_length, diffusion_steps, temperature, top_k, top_p,
         cfg_coef, guidance_scale, use_sampling, extend_stride,
         gen_type, chunked, chunk_size, record_tokens, record_window,
         disable_offload, disable_cache_clear, disable_fp16, disable_sequential,
@@ -730,9 +888,9 @@ def process_reference_audio(audio_path, auto_prompt_enabled, auto_prompt_type, g
     return None, None, None, False, ""
 
 def submit_lyrics(
-    lyrics, struct, genre, instrument, bpm, emotion, timbre, gender, extra_prompt, force_extra_prompt,
+    lyrics, struct, genre, instrument, bpm, emotion, timbre, gender, extra_prompt, include_dropdown_attributes, force_extra_prompt,
     audio_path, image_path, save_mp3, seed,
-    max_gen_length, diffusion_steps, temperature, top_k, top_p,
+    duration_seconds, max_gen_length, diffusion_steps, temperature, top_k, top_p,
     cfg_coef, guidance_scale, use_sampling, extend_stride,
     gen_type, chunked, chunk_size, record_tokens, record_window,
     disable_offload, disable_cache_clear, disable_fp16, disable_sequential,
@@ -767,14 +925,6 @@ def submit_lyrics(
     
     output_messages(f"✓ Lyrics structure validation passed")
     lyrics = normalized_lyrics
-
-    def build_description_text(text_value: str) -> str:
-        cleaned = text_value.strip() if isinstance(text_value, str) else ""
-        if not cleaned:
-            cleaned = "."
-        if "[Musicality-very-high]" not in cleaned:
-            return f"[Musicality-very-high], {cleaned}"
-        return cleaned
     
     # Limit lyrics length to prevent exceeding token limit
     # Get current model's character limit
@@ -810,6 +960,24 @@ def submit_lyrics(
     if audio_status:
         output_messages(audio_status)
     
+    # Call the model using the forward method with progress tracking
+    # Harmonize duration slider (seconds) with step-based control
+    duration_seconds = clamp_duration_seconds(duration_seconds)
+    max_gen_length = clamp_steps_to_model(seconds_to_steps(duration_seconds))
+    
+    # Convert steps to duration (25 steps per second)
+    # Large model supports up to 6750 steps (~270 seconds or 4m30s)
+    duration_from_steps = steps_to_seconds(max_gen_length)
+    
+    # Get model's actual max capacity
+    current_model_max = get_current_model_max_steps()
+    max_duration = steps_to_seconds(current_model_max)
+    
+    # Cap duration at model's maximum capacity
+    duration_from_steps = min(duration_from_steps, max_duration)
+    actual_steps = clamp_steps_to_model(seconds_to_steps(duration_from_steps))
+    max_gen_length = actual_steps
+
     # IMPORTANT: song_data["lyrics"] contains the user's lyrics and must NEVER be overwritten
     # when looping through presets. Each preset should use these same lyrics.
     song_data = {
@@ -817,7 +985,7 @@ def submit_lyrics(
         "struct": process_struct(struct),
         "genre": genre,
         "instrument": instrument,
-        "bpm": bpm, 
+        "bpm": bpm,
         "emotion": emotion,
         "timbre": timbre,
         "gender": gender,
@@ -829,31 +997,48 @@ def submit_lyrics(
         "melody_is_wav": not use_audio,  # True if no reference audio
         "time": current_time,
         "gen_type": gen_type,
-        "auto_prompt_type": auto_prompt_type if auto_prompt_enabled else None
+        "auto_prompt_type": auto_prompt_type if auto_prompt_enabled else None,
+        "include_dropdown_attributes": include_dropdown_attributes,
+        "duration_seconds": duration_from_steps
     }
-    
-    # Call the model using the forward method with progress tracking
-    # Convert steps to duration (25 steps per second)
-    # Large model supports up to 6750 steps (~270 seconds or 4m30s)
-    duration_from_steps = max_gen_length / 25.0
-    
-    # Get model's actual max capacity
-    current_model_max = MAX_GENERATION_LENGTHS.get(MODEL_VERSION, 6750) if MODEL_VERSION else 6750
-    max_duration = current_model_max / 25.0
-    
-    # Cap duration at model's maximum capacity
-    duration_from_steps = min(duration_from_steps, max_duration)
-    actual_steps = int(duration_from_steps * 25)
     
     # Log the actual values for debugging
     output_messages(f"Requested steps: {max_gen_length}, Actual generation: {actual_steps} steps (~{duration_from_steps:.1f}s, {int(duration_from_steps/60)}m{int(duration_from_steps%60)}s)")
     
+    if force_extra_prompt and not (extra_prompt and extra_prompt.strip()):
+        output_messages("⚠️ Warning: 'Use only extra prompt' is enabled but no extra description was provided!")
+        output_messages("Using fallback placeholder for description...")
+
+    description_for_model = compose_generation_description(
+        extra_prompt,
+        include_dropdown_attributes,
+        gender,
+        timbre,
+        genre,
+        emotion,
+        instrument,
+        bpm,
+        force_extra_prompt,
+    )
+
+    try:
+        top_k_value = int(top_k)
+    except (TypeError, ValueError):
+        top_k_value = -1
+    if top_k_value < 0:
+        top_k_value = -1
+
+    try:
+        top_p_value = float(top_p)
+    except (TypeError, ValueError):
+        top_p_value = 0.0
+
     gen_params = {
         'duration': duration_from_steps,
         'num_steps': diffusion_steps,
         'temperature': temperature,
-        'top_k': top_k,
-        'top_p': top_p,
+        'top_k': top_k_value,
+        'top_p': top_p_value,
         'cfg_coef': cfg_coef,
         'guidance_scale': guidance_scale,
         'use_sampling': use_sampling,
@@ -877,20 +1062,12 @@ def submit_lyrics(
             
             # Use progress interceptor to capture tqdm output
             with intercept_progress(progress_callback):
-                # Build description string with extra prompt
-                extra_prompt_text = extra_prompt.strip() if extra_prompt and isinstance(extra_prompt, str) else ""
-
-                if force_extra_prompt and not extra_prompt_text:
-                    output_messages("⚠️ Warning: 'Use only extra prompt' is enabled but no extra description was provided!")
-                    output_messages("Using fallback placeholder for description...")
-
-                description_for_model = build_description_text(extra_prompt_text)
-                
+                description_for_generation = description_for_model
                 # Print final prompt to console
                 print("\n" + "="*80)
                 print("GENERATING SONG WITH PROMPT:")
                 print("="*80)
-                print(f"Description: {description_for_model}")
+                print(f"Description: {description_for_generation}")
                 if song_data["sample_prompt"] and song_data["audio_path"]:
                     print(f"Using reference audio for consistent voice")
                 print("="*80 + "\n")
@@ -898,7 +1075,7 @@ def submit_lyrics(
                 # Prepare generation input based on new format
                 generate_input = {
                     'lyrics': [song_data["lyrics"]],
-                    'descriptions': [description_for_model],
+                    'descriptions': [description_for_generation],
                     'melody_wavs': song_data["pmt_wav"],
                     'vocal_wavs': song_data["vocal_wav"],
                     'bgm_wavs': song_data["bgm_wav"],
@@ -908,7 +1085,7 @@ def submit_lyrics(
                 # Call model with correct interface matching original
                 audio_data = MODEL(
                     lyric=song_data["lyrics"],
-                    description=description_for_model,
+                    description=description_for_generation,
                     prompt_audio_path=None,  # We handle audio processing separately
                     genre=song_data["auto_prompt_type"] if song_data["auto_prompt_type"] else None,
                     auto_prompt_path=auto_prompt_manager.get_fallback_prompt_path(),
@@ -1073,7 +1250,17 @@ def submit_lyrics(
             should_generate = loop_presets or (not loop_presets and (preset_name is not None or gen_idx > 0))
             
             # Build model description based on optional extra prompt
-            generation_description = build_description_text(extra_prompt.strip() if extra_prompt else "")
+            generation_description = compose_generation_description(
+                extra_prompt,
+                include_dropdown_attributes,
+                current_gender,
+                current_timbre,
+                current_genre,
+                current_emotion,
+                current_instrument,
+                bpm,
+                force_extra_prompt,
+            )
             
             if should_generate:
                 try:
@@ -1268,9 +1455,9 @@ def submit_lyrics(
                 
                 # Save metadata (use actual generated values, not original if randomized)
                 metadata = collect_current_parameters(
-                    lyrics, current_genre, current_instrument, bpm, current_emotion, current_timbre, current_gender, extra_prompt, force_extra_prompt,
+                    lyrics, current_genre, current_instrument, bpm, current_emotion, current_timbre, current_gender, extra_prompt, include_dropdown_attributes, force_extra_prompt,
                     audio_path, image_path, save_mp3, used_seed,
-                    max_gen_length, diffusion_steps, temperature, top_k, top_p,
+                    duration_from_steps, max_gen_length, diffusion_steps, temperature, top_k, top_p,
                     cfg_coef, guidance_scale, use_sampling, extend_stride,
                     gen_type, chunked, chunk_size, record_tokens, record_window,
                     disable_offload, disable_cache_clear, disable_fp16, disable_sequential,
@@ -1387,88 +1574,118 @@ with gr.Blocks(title="SECourses LeVo Song Generation App",theme=gr.themes.Soft()
                         submit_btn = gr.Button("🎵 Generate Song", variant="primary")
                         open_folder_btn = gr.Button("📁 Open Output Folder", variant="secondary")
             
-                    # Preset controls
-                    with gr.Accordion("Presets", open=True):
-                        with gr.Row():
-                            preset_dropdown = gr.Dropdown(
-                                label="Select Preset",
-                                choices=preset_manager.get_preset_list(),
-                                value=None,
-                                interactive=True
-                            )
-                            load_preset_btn = gr.Button("📂 Load Preset", variant="secondary")
-                            refresh_preset_btn = gr.Button("🔄", variant="secondary", scale=0)
-                        
-                        with gr.Row():
-                            preset_name_input = gr.Textbox(
-                                label="Preset Name",
-                                placeholder="Enter preset name to save...",
-                                scale=3
-                            )
-                            save_preset_btn = gr.Button("💾 Save Preset", variant="secondary", scale=1)
-                        
-                        with gr.Row():
-                            loop_presets = gr.Checkbox(
-                                label="Loop all presets",
-                                value=False,
-                                info="Generate songs using each saved preset"
-                            )
-                            
-                            randomize_params = gr.Checkbox(
-                                label="Randomize genre, instrument, emotion, timbre & gender",
-                                value=False,
-                                info="Randomly select values from dropdowns for each generation"
+                    # Preset controls and duration
+                    with gr.Row():
+                        with gr.Column(scale=3):
+                            with gr.Accordion("Presets", open=True):
+                                with gr.Row():
+                                    preset_dropdown = gr.Dropdown(
+                                        label="Select Preset",
+                                        choices=preset_manager.get_preset_list(),
+                                        value=None,
+                                        interactive=True
+                                    )
+                                    load_preset_btn = gr.Button("📂 Load Preset", variant="secondary")
+                                    refresh_preset_btn = gr.Button("🔄", variant="secondary", scale=0)
+                                
+                                with gr.Row():
+                                    preset_name_input = gr.Textbox(
+                                        label="Preset Name",
+                                        placeholder="Enter preset name to save...",
+                                        scale=3
+                                    )
+                                    save_preset_btn = gr.Button("💾 Save Preset", variant="secondary", scale=1)
+                                
+                                with gr.Row():
+                                    loop_presets = gr.Checkbox(
+                                        label="Loop all presets",
+                                        value=False,
+                                        info="Generate songs using each saved preset"
+                                    )
+                                    
+                                    randomize_params = gr.Checkbox(
+                                        label="Randomize genre, instrument, emotion, timbre & gender",
+                                        value=False,
+                                        info="Randomly select values from dropdowns for each generation"
+                                    )
+                        with gr.Column(scale=2):
+                            duration_slider = gr.Slider(
+                                label="Duration (seconds)",
+                                minimum=DURATION_SLIDER_UI_MIN,
+                                maximum=int(steps_to_seconds(DEFAULT_MAX_GENERATION_STEPS)),
+                                value=DEFAULT_DURATION_SECONDS,
+                                step=1,
+                                info=format_duration_slider_info(DEFAULT_MAX_GENERATION_STEPS)
                             )
                     
                     struct = gr.JSON(
-                label="Song Structure (Optional - for display only)",
-                value=[
-                    ["intro", 1],
-                    ["verse", 1],
-                    ["bridge", 1],
-                    ["inst", 1],
-                    ["chorus", 1],
-                    ["outro", 1]
-                ],
-                visible=False  # Hide since it's not used by the model
+                        label="Song Structure (Optional - for display only)",
+                        value=[
+                            ["intro", 1],
+                            ["verse", 1],
+                            ["bridge", 1],
+                            ["inst", 1],
+                            ["chorus", 1],
+                            ["outro", 1]
+                        ],
+                        visible=False  # Hide since it's not used by the model
                     )
                     
                     with gr.Row():
-                        genre = gr.Dropdown(
-                            label="Genre",
-                            choices=GENRES,
-                            value="electronic"
-                        )
-                        instrument = gr.Dropdown(
-                            label="Instrument",
-                            choices=INSTRUMENTS,
-                            value="synthesizer and drums"
-                        )
-                        bpm = gr.Slider(
-                            label="BPM",
-                            minimum=30,
-                            maximum=200,
-                            value=150,
-                            step=1,
-                            info="Beats per minute"
-                        )
-                    
-                    with gr.Row():
-                        emotion = gr.Dropdown(
-                            label="Emotion",
-                            choices=EMOTIONS,
-                            value="uplifting"
-                        )
-                        timbre = gr.Dropdown(
-                            label="Timbre",
-                            choices=TIMBRES,
-                            value="bright"
-                        )
-                        gender = gr.Dropdown(
-                            label="Gender",
-                            choices=GENDERS,
-                            value="male"
-                        )
+                        with gr.Column(scale=2):
+                            with gr.Row():
+                                genre = gr.Dropdown(
+                                    label="Genre",
+                                    choices=GENRES,
+                                    value="None"
+                                )
+                                instrument = gr.Dropdown(
+                                    label="Instrument",
+                                    choices=INSTRUMENTS,
+                                    value="None"
+                                )
+                                bpm = gr.Slider(
+                                    label="BPM",
+                                    minimum=30,
+                                    maximum=200,
+                                    value=150,
+                                    step=1,
+                                    info="Beats per minute"
+                                )
+                            
+                            with gr.Row():
+                                emotion = gr.Dropdown(
+                                    label="Emotion",
+                                    choices=EMOTIONS,
+                                    value="None"
+                                )
+                                timbre = gr.Dropdown(
+                                    label="Timbre",
+                                    choices=TIMBRES,
+                                    value="None"
+                                )
+                                gender = gr.Dropdown(
+                                    label="Gender",
+                                    choices=GENDERS,
+                                    value="None"
+                                )
+                        with gr.Column(scale=1):
+                            extra_prompt = gr.Textbox(
+                                label="Extra Description (Optional)",
+                                placeholder="e.g., pop influences, bpm 130, acoustic feel, summer vibes...",
+                                lines=4,
+                                info="Add any additional musical description or parameters not covered by the dropdowns"
+                            )
+                            force_extra_prompt = gr.Checkbox(
+                                label="Use only extra prompt",
+                                value=False,
+                                info="Ignore dropdowns and use only the extra description"
+                            )
+                            include_dropdown_attributes = gr.Checkbox(
+                                label="Include dropdown attributes",
+                                value=False,
+                                info="Append selected gender, timbre, genre, emotion, instrument and BPM to the description"
+                            )
                     
                     with gr.Row():
                         gen_type = gr.Radio(
@@ -1483,21 +1700,50 @@ with gr.Blocks(title="SECourses LeVo Song Generation App",theme=gr.themes.Soft()
                         seed_input = gr.Number(label="Seed (for reproducibility)", value=-1, precision=0, 
                                             info="Use -1 for random, or any positive number for reproducible results")
                     
-                    # Extra text prompt for additional parameters
-                    with gr.Row():
-                        with gr.Column(scale=4):
-                            extra_prompt = gr.Textbox(
-                                label="Extra Description (Optional)",
-                                placeholder="e.g., pop influences, bpm 130, acoustic feel, summer vibes...",
-                                lines=2,
-                                info="Add any additional musical description or parameters not covered by the dropdowns"
-                            )
-                        with gr.Column(scale=1):
-                            force_extra_prompt = gr.Checkbox(
-                                label="Use only extra prompt",
-                                value=False,
-                                info="Ignore dropdowns and use only the extra description"
-                            )
+                    description_preview = gr.Markdown(format_description_preview("[Musicality-very-high], ."))
+
+                    def update_description_preview(
+                        extra_prompt_value,
+                        include_dropdown_value,
+                        force_extra_value,
+                        gender_value,
+                        timbre_value,
+                        genre_value,
+                        emotion_value,
+                        instrument_value,
+                        bpm_value,
+                    ):
+                        description = compose_generation_description(
+                            extra_prompt_value,
+                            include_dropdown_value,
+                            gender_value,
+                            timbre_value,
+                            genre_value,
+                            emotion_value,
+                            instrument_value,
+                            bpm_value,
+                            force_extra_value,
+                        )
+                        return format_description_preview(description)
+
+                    description_preview_inputs = [
+                        extra_prompt,
+                        include_dropdown_attributes,
+                        force_extra_prompt,
+                        gender,
+                        timbre,
+                        genre,
+                        emotion,
+                        instrument,
+                        bpm,
+                    ]
+
+                    for _component in description_preview_inputs:
+                        _component.change(
+                            fn=update_description_preview,
+                            inputs=description_preview_inputs,
+                            outputs=[description_preview]
+                        )
                     
                     # Number of generations slider
                     with gr.Row():
@@ -1640,11 +1886,11 @@ with gr.Blocks(title="SECourses LeVo Song Generation App",theme=gr.themes.Soft()
                         )
                         top_k = gr.Slider(
                             label="Top-k Sampling",
-                            minimum=1,
+                            minimum=-1,
                             maximum=250,
-                            value=50,
+                            value=-1,
                             step=1,
-                            info="Limits sampling to top k tokens. Large model optimized at 50 (default)"
+                            info="Limits sampling to top k tokens (-1 = no limit, official default)"
                         )
                         top_p = gr.Slider(
                             label="Top-p (Nucleus Sampling)",
@@ -1960,6 +2206,82 @@ with gr.Blocks(title="SECourses LeVo Song Generation App",theme=gr.themes.Soft()
         else:
             return f"{char_count}/{max_chars} characters{duration_str}"
 
+    def live_char_from_duration(duration_value, lyrics_value):
+        """Provide responsive character counter updates while user drags duration slider."""
+        max_steps = get_current_model_max_steps()
+        max_steps = max(MIN_GENERATION_STEPS, max_steps)
+        clamped_duration = clamp_duration_seconds(duration_value)
+        clamped_duration = max(steps_to_seconds(MIN_GENERATION_STEPS), min(clamped_duration, steps_to_seconds(max_steps)))
+        steps = clamp_steps_to_model(seconds_to_steps(clamped_duration))
+        return update_char_count_and_duration(lyrics_value, steps)
+
+    def live_char_from_steps(steps_value, lyrics_value):
+        """Provide responsive character counter updates while user drags step slider."""
+        max_steps = get_current_model_max_steps()
+        max_steps = max(MIN_GENERATION_STEPS, max_steps)
+        try:
+            requested_steps = int(round(float(steps_value)))
+        except (TypeError, ValueError):
+            requested_steps = DEFAULT_GENERATION_STEPS
+        clamped_steps = min(clamp_steps_to_model(requested_steps), max_steps)
+        return update_char_count_and_duration(lyrics_value, clamped_steps)
+
+    def sync_duration_slider(duration_value, lyrics_value):
+        """Snap duration slider to valid range and sync max generation length when user releases."""
+        max_steps = max(MIN_GENERATION_STEPS, get_current_model_max_steps())
+        max_duration_seconds = int(round(steps_to_seconds(max_steps)))
+        min_seconds = get_min_duration_seconds()
+        if max_duration_seconds < min_seconds:
+            max_duration_seconds = min_seconds
+
+        clamped_duration = clamp_duration_seconds(duration_value)
+        clamped_duration = max(min_seconds, min(clamped_duration, max_duration_seconds))
+        clamped_steps = clamp_steps_to_model(seconds_to_steps(clamped_duration))
+        clamped_steps = min(max_steps, max(MIN_GENERATION_STEPS, clamped_steps))
+
+        clamped_duration = max(min_seconds, min(steps_to_seconds(clamped_steps), max_duration_seconds))
+        char_text = update_char_count_and_duration(lyrics_value, clamped_steps)
+
+        info_text = format_duration_slider_info(max_steps)
+        duration_update = gr.update(
+            value=int(round(clamped_duration)),
+            minimum=DURATION_SLIDER_UI_MIN,
+            maximum=max_duration_seconds,
+            info=info_text
+        )
+        steps_update = gr.update(value=clamped_steps, maximum=max_steps)
+        return duration_update, steps_update, char_text
+
+    def sync_step_slider(steps_value, lyrics_value):
+        """Snap max generation length slider and sync duration when user releases."""
+        max_steps = max(MIN_GENERATION_STEPS, get_current_model_max_steps())
+        max_duration_seconds = int(round(steps_to_seconds(max_steps)))
+        min_seconds = get_min_duration_seconds()
+        if max_duration_seconds < min_seconds:
+            max_duration_seconds = min_seconds
+
+        try:
+            requested_steps = int(round(float(steps_value)))
+        except (TypeError, ValueError):
+            requested_steps = DEFAULT_GENERATION_STEPS
+
+        clamped_steps = max(MIN_GENERATION_STEPS, min(requested_steps, max_steps))
+        clamped_steps = clamp_steps_to_model(clamped_steps)
+        clamped_steps = min(max_steps, max(MIN_GENERATION_STEPS, clamped_steps))
+        clamped_duration = max(min_seconds, min(steps_to_seconds(clamped_steps), max_duration_seconds))
+
+        char_text = update_char_count_and_duration(lyrics_value, clamped_steps)
+
+        info_text = format_duration_slider_info(max_steps)
+        steps_update = gr.update(value=clamped_steps, maximum=max_steps)
+        duration_update = gr.update(
+            value=int(round(clamped_duration)),
+            minimum=DURATION_SLIDER_UI_MIN,
+            maximum=max_duration_seconds,
+            info=info_text
+        )
+        return steps_update, duration_update, char_text
+
     lyrics.change(
         fn=update_char_count_and_duration,
         inputs=[lyrics, max_gen_length],
@@ -1967,16 +2289,44 @@ with gr.Blocks(title="SECourses LeVo Song Generation App",theme=gr.themes.Soft()
     )
 
     max_gen_length.change(
-        fn=update_char_count_and_duration,
-        inputs=[lyrics, max_gen_length],
-        outputs=[char_counter]
+        fn=live_char_from_steps,
+        inputs=[max_gen_length, lyrics],
+        outputs=[char_counter],
+        js=f"(steps, lyrics) => [Math.max({MIN_GENERATION_STEPS}, steps ?? {MIN_GENERATION_STEPS}), lyrics]"
+    )
+
+    max_gen_length.release(
+        fn=sync_step_slider,
+        inputs=[max_gen_length, lyrics],
+        outputs=[max_gen_length, duration_slider, char_counter],
+        js=f"(steps, lyrics) => [Math.max({MIN_GENERATION_STEPS}, steps ?? {MIN_GENERATION_STEPS}), lyrics]"
+    )
+
+    duration_slider.change(
+        fn=live_char_from_duration,
+        inputs=[duration_slider, lyrics],
+        outputs=[char_counter],
+        js=f"(duration, lyrics) => [Math.max({MIN_DURATION_SECONDS}, duration ?? {MIN_DURATION_SECONDS}), lyrics]"
+    )
+
+    duration_slider.release(
+        fn=sync_duration_slider,
+        inputs=[duration_slider, lyrics],
+        outputs=[duration_slider, max_gen_length, char_counter],
+        js=f"(duration, lyrics) => [Math.max({MIN_DURATION_SECONDS}, duration ?? {MIN_DURATION_SECONDS}), lyrics]"
     )
 
     # Initialize character counter with default lyrics and generation length
     demo.load(
-        fn=update_char_count_and_duration,
-        inputs=[lyrics, max_gen_length],
-        outputs=[char_counter]
+        fn=sync_step_slider,
+        inputs=[max_gen_length, lyrics],
+        outputs=[max_gen_length, duration_slider, char_counter]
+    )
+
+    demo.load(
+        fn=update_description_preview,
+        inputs=description_preview_inputs,
+        outputs=[description_preview]
     )
     
     # Preset functionality
@@ -1992,14 +2342,14 @@ with gr.Blocks(title="SECourses LeVo Song Generation App",theme=gr.themes.Soft()
                 return gr.Dropdown(choices=preset_manager.get_preset_list())
         
         # Collect all parameters - args order matches all_inputs order
-        # all_inputs = [lyrics, genre, instrument, bpm, emotion, timbre, gender, extra_prompt, force_extra_prompt,
+        # all_inputs = [lyrics, genre, instrument, bpm, emotion, timbre, gender, extra_prompt, include_dropdown_attributes, force_extra_prompt,
         #              audio_path, image_upload, save_mp3_check, seed_input,
         #              num_generations, loop_presets, randomize_params, ...]
         param_values = list(args)
         
         # Safety check for parameter count (updated for new parameters)
-        if len(param_values) != 36:  # Updated count including auto_prompt_enabled and auto_prompt_type
-            error_msg = f"Invalid parameter count: expected 36, got {len(param_values)}"
+        if len(param_values) != 38:  # Updated count including duration slider and auto prompt parameters
+            error_msg = f"Invalid parameter count: expected 38, got {len(param_values)}"
             print(f"❌ ERROR: {error_msg}")
             gr.Error(error_msg)
             return gr.Dropdown(choices=preset_manager.get_preset_list())
@@ -2014,34 +2364,36 @@ with gr.Blocks(title="SECourses LeVo Song Generation App",theme=gr.themes.Soft()
             'timbre': param_values[5],
             'gender': param_values[6],
             'extra_prompt': param_values[7],
-            'force_extra_prompt': param_values[8],
-            'audio_path': param_values[9],
-            'image_path': param_values[10],  # This is image_upload in all_inputs
-            'save_mp3': param_values[11],
-            'seed': param_values[12],
-            'num_generations': param_values[13],
-            'loop_presets': param_values[14],
-            'randomize_params': param_values[15],
-            'max_gen_length': param_values[16],
-            'diffusion_steps': param_values[17],
-            'temperature': param_values[18],
-            'top_k': param_values[19],
-            'top_p': param_values[20],
-            'cfg_coef': param_values[21],
-            'guidance_scale': param_values[22],
-            'use_sampling': param_values[23],
-            'extend_stride': param_values[24],
-            'gen_type': param_values[25],
-            'chunked': param_values[26],
-            'chunk_size': param_values[27],
-            'record_tokens': param_values[28],
-            'record_window': param_values[29],
-            'disable_offload': param_values[30],
-            'disable_cache_clear': param_values[31],
-            'disable_fp16': param_values[32],
-            'disable_sequential': param_values[33],
-            'auto_prompt_enabled': param_values[34],
-            'auto_prompt_type': param_values[35]
+            'include_dropdown_attributes': param_values[8],
+            'force_extra_prompt': param_values[9],
+            'audio_path': param_values[10],
+            'image_path': param_values[11],  # This is image_upload in all_inputs
+            'save_mp3': param_values[12],
+            'seed': param_values[13],
+            'num_generations': param_values[14],
+            'loop_presets': param_values[15],
+            'randomize_params': param_values[16],
+            'duration_seconds': param_values[17],
+            'max_gen_length': param_values[18],
+            'diffusion_steps': param_values[19],
+            'temperature': param_values[20],
+            'top_k': param_values[21],
+            'top_p': param_values[22],
+            'cfg_coef': param_values[23],
+            'guidance_scale': param_values[24],
+            'use_sampling': param_values[25],
+            'extend_stride': param_values[26],
+            'gen_type': param_values[27],
+            'chunked': param_values[28],
+            'chunk_size': param_values[29],
+            'record_tokens': param_values[30],
+            'record_window': param_values[31],
+            'disable_offload': param_values[32],
+            'disable_cache_clear': param_values[33],
+            'disable_fp16': param_values[34],
+            'disable_sequential': param_values[35],
+            'auto_prompt_enabled': param_values[36],
+            'auto_prompt_type': param_values[37]
         }
         # Save preset
         
@@ -2060,38 +2412,40 @@ with gr.Blocks(title="SECourses LeVo Song Generation App",theme=gr.themes.Soft()
     def handle_load_preset(preset_name, current_lyrics):
         """Load a preset and update all UI components"""
         if not preset_name:
-            return [gr.update()] * 36  # Updated to 36 for all parameters (including new ones)
+            return [gr.update()] * 38  # Updated to 38 for all parameters (including new ones)
         
         preset_data, message = preset_manager.load_preset(preset_name)
         if preset_data is None:
             print(f"❌ ERROR: {message}")
             gr.Error(message)
-            return [gr.update()] * 36
+            return [gr.update()] * 38
         
         # Load preset values
         
         # Default values matching UI defaults - use current lyrics as default
         defaults = {
             'lyrics': current_lyrics if current_lyrics else EXAMPLE_LYRICS,
-            'genre': 'electronic',
-            'instrument': 'synthesizer and drums',
+            'genre': 'None',
+            'instrument': 'None',
             'bpm': 150,
-            'emotion': 'uplifting',
-            'timbre': 'bright',
-            'gender': 'male',
+            'emotion': 'None',
+            'timbre': 'None',
+            'gender': 'None',
             'extra_prompt': '',
+            'include_dropdown_attributes': False,
             'force_extra_prompt': False,
             'audio_path': None,
             'image_path': None,
             'save_mp3': True,
             'seed': -1,
+            'duration_seconds': DEFAULT_DURATION_SECONDS,
             'num_generations': 1,
             'loop_presets': False,
             'randomize_params': False,
             'max_gen_length': 4500,  # Default to 3 minutes for Large model
             'diffusion_steps': 50,
             'temperature': 0.8,
-            'top_k': 50,
+            'top_k': -1,
             'top_p': 0.0,
             'cfg_coef': 1.5,
             'guidance_scale': 1.5,
@@ -2113,6 +2467,18 @@ with gr.Blocks(title="SECourses LeVo Song Generation App",theme=gr.themes.Soft()
         # Apply preset data with defaults for missing values
         values = preset_manager.apply_preset_to_ui(preset_data, defaults)
         
+        if 'top_k' in values:
+            try:
+                values['top_k'] = int(values['top_k'])
+            except (TypeError, ValueError):
+                values['top_k'] = defaults['top_k']
+        else:
+            values['top_k'] = defaults['top_k']
+
+        values['include_dropdown_attributes'] = bool(
+            values.get('include_dropdown_attributes', defaults['include_dropdown_attributes'])
+        )
+
         # Get current model's max generation length and clamp preset value
         current_max_length = 6750  # Default to Large model capacity
         if MODEL_VERSION and MODEL_VERSION in MAX_GENERATION_LENGTHS:
@@ -2121,10 +2487,19 @@ with gr.Blocks(title="SECourses LeVo Song Generation App",theme=gr.themes.Soft()
             model_name = op.basename(CURRENT_MODEL_PATH)
             current_max_length = MAX_GENERATION_LENGTHS.get(model_name, 6750)
         
-        # Clamp max_gen_length to current model's maximum
+        # Clamp max_gen_length to current model's maximum and align duration slider
         preset_max_gen = values.get('max_gen_length', defaults['max_gen_length'])
-        clamped_max_gen = min(preset_max_gen, current_max_length)
+        preset_duration = values.get('duration_seconds')
+        
+        if preset_duration is not None:
+            candidate_steps = clamp_steps_to_model(seconds_to_steps(preset_duration))
+        else:
+            candidate_steps = clamp_steps_to_model(preset_max_gen)
+        
+        clamped_max_gen = min(candidate_steps, current_max_length)
+        clamped_max_gen = max(MIN_GENERATION_STEPS, clamped_max_gen)
         values['max_gen_length'] = clamped_max_gen
+        values['duration_seconds'] = int(round(steps_to_seconds(clamped_max_gen)))
         
         # Validate auto_prompt_type against available choices
         preset_auto_prompt_type = values.get('auto_prompt_type', defaults['auto_prompt_type'])
@@ -2139,6 +2514,14 @@ with gr.Blocks(title="SECourses LeVo Song Generation App",theme=gr.themes.Soft()
         preset_manager.set_last_used_preset(preset_name)
         gr.Info(message)
         
+        duration_slider_max = int(round(steps_to_seconds(current_max_length)))
+        duration_slider_min_seconds = get_min_duration_seconds()
+        if duration_slider_max < duration_slider_min_seconds:
+            duration_slider_min_seconds = duration_slider_max
+        duration_value = int(round(steps_to_seconds(values['max_gen_length'])))
+        duration_value = max(duration_slider_min_seconds, min(duration_value, duration_slider_max))
+        duration_slider_info = format_duration_slider_info(current_max_length)
+
         # Return updates for all UI components, with max_gen_length clamped and slider max updated
         return [
             values['lyrics'],
@@ -2149,6 +2532,7 @@ with gr.Blocks(title="SECourses LeVo Song Generation App",theme=gr.themes.Soft()
             values['timbre'],
             values['gender'],
             values['extra_prompt'],
+            values['include_dropdown_attributes'],
             values['force_extra_prompt'],
             values['audio_path'],
             values['image_path'],
@@ -2157,6 +2541,12 @@ with gr.Blocks(title="SECourses LeVo Song Generation App",theme=gr.themes.Soft()
             values['num_generations'],
             values['loop_presets'],
             values['randomize_params'],
+            gr.update(
+                value=duration_value,
+                minimum=DURATION_SLIDER_UI_MIN,
+                maximum=duration_slider_max,
+                info=duration_slider_info
+            ),
             gr.update(value=clamped_max_gen, maximum=current_max_length),  # Update slider with clamped value and max
             values['diffusion_steps'],
             values['temperature'],
@@ -2185,9 +2575,9 @@ with gr.Blocks(title="SECourses LeVo Song Generation App",theme=gr.themes.Soft()
     
     # Connect preset handlers
     all_inputs = [
-        lyrics, genre, instrument, bpm, emotion, timbre, gender, extra_prompt, force_extra_prompt,
+        lyrics, genre, instrument, bpm, emotion, timbre, gender, extra_prompt, include_dropdown_attributes, force_extra_prompt,
         audio_path, image_upload, save_mp3_check, seed_input,
-        num_generations, loop_presets, randomize_params, max_gen_length, diffusion_steps, temperature, top_k, top_p,
+        num_generations, loop_presets, randomize_params, duration_slider, max_gen_length, diffusion_steps, temperature, top_k, top_p,
         cfg_coef, guidance_scale, use_sampling, extend_stride,
         gen_type, chunked, chunk_size, record_tokens, record_window,
         disable_offload, disable_cache_clear, disable_fp16, disable_sequential,
@@ -2310,9 +2700,9 @@ with gr.Blocks(title="SECourses LeVo Song Generation App",theme=gr.themes.Soft()
     submit_btn.click(
         fn=submit_lyrics,
         inputs=[
-            lyrics, struct, genre, instrument, bpm, emotion, timbre, gender, extra_prompt, force_extra_prompt,
+            lyrics, struct, genre, instrument, bpm, emotion, timbre, gender, extra_prompt, include_dropdown_attributes, force_extra_prompt,
             audio_path, image_upload, save_mp3_check, seed_input,
-            max_gen_length, diffusion_steps, temperature, top_k, top_p,
+            duration_slider, max_gen_length, diffusion_steps, temperature, top_k, top_p,
             cfg_coef, guidance_scale, use_sampling, extend_stride,
             gen_type, chunked, chunk_size, record_tokens, record_window,
             disable_offload, disable_cache_clear, disable_fp16, disable_sequential,
@@ -2356,9 +2746,9 @@ with gr.Blocks(title="SECourses LeVo Song Generation App",theme=gr.themes.Soft()
         fn=run_batch_processing,
         inputs=[
             batch_input_folder, batch_output_folder, skip_existing, loop_presets, num_generations,
-            lyrics, genre, instrument, bpm, emotion, timbre, gender, extra_prompt, force_extra_prompt,
+            lyrics, genre, instrument, bpm, emotion, timbre, gender, extra_prompt, include_dropdown_attributes, force_extra_prompt,
             audio_path, image_upload, save_mp3_check, seed_input,
-            max_gen_length, diffusion_steps, temperature, top_k, top_p,
+            duration_slider, max_gen_length, diffusion_steps, temperature, top_k, top_p,
             cfg_coef, guidance_scale, use_sampling, extend_stride,
             gen_type, chunked, chunk_size, record_tokens, record_window,
             disable_offload, disable_cache_clear, disable_fp16, disable_sequential,
@@ -2385,7 +2775,7 @@ with gr.Blocks(title="SECourses LeVo Song Generation App",theme=gr.themes.Soft()
     def handle_model_selection_change_with_auto_load(selected_model):
         """Handle model dropdown selection change with auto-loading"""
         if not selected_model or selected_model not in model_paths:
-            return "Select a model to see details", "**Status**: No model selected", gr.update()
+            return "Select a model to see details", "**Status**: No model selected", gr.update(), gr.update()
         
         model_path = model_paths[selected_model]
         info = get_model_info(model_path)
@@ -2405,7 +2795,8 @@ with gr.Blocks(title="SECourses LeVo Song Generation App",theme=gr.themes.Soft()
                 value=default_value,
                 info=f"Target generation steps. Model {model_name} supports up to {max_length} steps (~{int(max_length/25)}s or {int(max_length/25/60)}m{int(max_length/25%60)}s)"
             )
-            return info, status, max_gen_update
+            duration_update = create_duration_slider_update(default_value, max_length)
+            return info, status, max_gen_update, duration_update
         
         # Auto-load the selected model
         print(f"🔄 Auto-loading selected model: {op.basename(model_path)}")
@@ -2425,19 +2816,25 @@ with gr.Blocks(title="SECourses LeVo Song Generation App",theme=gr.themes.Soft()
                 value=default_value,
                 info=f"Target generation steps. Model {model_name} supports up to {max_length} steps (~{int(max_length/25)}s or {int(max_length/25/60)}m{int(max_length/25%60)}s)"
             )
-            return info, status, max_gen_update
+            duration_update = create_duration_slider_update(default_value, max_length)
+            return info, status, max_gen_update, duration_update
         else:
             status = f"**Status**: ❌ Failed to load model"
-            return info, status, gr.update()
+            return info, status, gr.update(), gr.update()
     
     def handle_load_model(selected_model, progress=gr.Progress()):
         """Handle model loading with progress tracking"""
         # If no models available, try to refresh the list
         if not model_choices:
-            return handle_refresh_models()
+            return (
+                "❌ No models found. Please refresh the list.",
+                "**Status**: No models available",
+                gr.update(),
+                gr.update()
+            )
         
         if not selected_model or selected_model not in model_paths:
-            return "❌ Please select a valid model", "**Status**: No model selected", gr.update()
+            return "❌ Please select a valid model", "**Status**: No model selected", gr.update(), gr.update()
         
         model_path = model_paths[selected_model]
         
@@ -2466,11 +2863,12 @@ with gr.Blocks(title="SECourses LeVo Song Generation App",theme=gr.themes.Soft()
                 value=default_value,
                 info=f"Target generation steps. Model {model_name} supports up to {max_length} steps (~{int(max_length/25)}s or {int(max_length/25/60)}m{int(max_length/25%60)}s)"
             )
+            duration_update = create_duration_slider_update(default_value, max_length)
             
-            return info, status, max_gen_update
+            return info, status, max_gen_update, duration_update
         else:
             status = f"**Status**: ❌ Failed to load model"
-            return message, status, gr.update()
+            return message, status, gr.update(), gr.update()
     
     def handle_refresh_models():
         """Refresh the model list"""
@@ -2501,13 +2899,13 @@ with gr.Blocks(title="SECourses LeVo Song Generation App",theme=gr.themes.Soft()
             status = "**Status**: No models available"
             dropdown_update = gr.update(choices=[], value=None)
         
-        return info, status, gr.update(), dropdown_update
+        return info, status, gr.update(), gr.update(), dropdown_update
     
     # Connect model selection handlers - auto-load when model is selected
     model_dropdown.change(
         fn=handle_model_selection_change_with_auto_load,
         inputs=[model_dropdown],
-        outputs=[model_info_display, model_status, max_gen_length]
+        outputs=[model_info_display, model_status, max_gen_length, duration_slider]
     )
     
     if model_choices:
@@ -2515,14 +2913,14 @@ with gr.Blocks(title="SECourses LeVo Song Generation App",theme=gr.themes.Soft()
         load_model_btn.click(
             fn=handle_load_model,
             inputs=[model_dropdown],
-            outputs=[model_info_display, model_status, max_gen_length]
+            outputs=[model_info_display, model_status, max_gen_length, duration_slider]
         )
     else:
         # Refresh model list when no models available
         load_model_btn.click(
             fn=handle_refresh_models,
             inputs=[],
-            outputs=[model_info_display, model_status, max_gen_length, model_dropdown]
+            outputs=[model_info_display, model_status, max_gen_length, duration_slider, model_dropdown]
         )
     
     # Auto-load first available model on startup
@@ -2554,18 +2952,19 @@ with gr.Blocks(title="SECourses LeVo Song Generation App",theme=gr.themes.Soft()
                     value=default_value,
                     info=f"Target generation steps. Model {model_name} supports up to {max_length} steps (~{int(max_length/25)}s or {int(max_length/25/60)}m{int(max_length/25%60)}s)"
                 )
+                duration_update = create_duration_slider_update(default_value, max_length)
                 
-                return info, status, max_gen_update
+                return info, status, max_gen_update, duration_update
             else:
                 status = f"**Status**: ⚠️ Auto-load failed - please select and load manually"
-                return "❌ Auto-load failed. Please select and load a model manually.", status, gr.update()
+                return "❌ Auto-load failed. Please select and load a model manually.", status, gr.update(), gr.update()
         else:
-            return "❌ No models found. Please download models first.", "**Status**: No models available", gr.update()
+            return "❌ No models found. Please download models first.", "**Status**: No models available", gr.update(), gr.update()
     
     demo.load(
         fn=auto_load_first_model,
         inputs=[],
-        outputs=[model_info_display, model_status, max_gen_length]
+        outputs=[model_info_display, model_status, max_gen_length, duration_slider]
     )
 
 if __name__ == "__main__":

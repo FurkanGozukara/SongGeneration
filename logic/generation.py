@@ -100,6 +100,49 @@ def normalize_lyrics(lyrics: str) -> str:
     return " ; ".join(normalized_parts)
 
 
+def compose_description_from_params(params: Dict[str, Any]) -> str:
+    """Compose the textual description used during batch generation."""
+    extra_prompt = (params.get('extra_prompt') or "").strip()
+    include_dropdown = bool(params.get('include_dropdown_attributes', False))
+    force_extra_prompt = bool(params.get('force_extra_prompt', False))
+
+    base_components: List[str] = []
+
+    if include_dropdown and not force_extra_prompt:
+        attribute_values = [
+            params.get('gender'),
+            params.get('timbre'),
+            params.get('genre'),
+            params.get('emotion'),
+            params.get('instrument'),
+        ]
+        attribute_parts = [str(value).strip() for value in attribute_values if value]
+
+        bpm_value = params.get('bpm')
+        if bpm_value is not None and str(bpm_value).strip():
+            try:
+                bpm_int = int(float(bpm_value))
+            except (TypeError, ValueError):
+                bpm_int = bpm_value
+            attribute_parts.append(f"the bpm is {bpm_int}")
+
+        if attribute_parts:
+            base_components.append(", ".join(attribute_parts))
+
+    if extra_prompt:
+        base_components.append(extra_prompt)
+
+    base_text = ", ".join(component for component in base_components if component).strip()
+
+    if not base_text or (force_extra_prompt and not extra_prompt):
+        base_text = "."
+
+    if "[Musicality-very-high]" not in base_text:
+        base_text = f"[Musicality-very-high], {base_text}"
+
+    return base_text
+
+
 class CancellationToken:
     """Thread-safe cancellation token for stopping generation"""
     def __init__(self):
@@ -265,12 +308,24 @@ def generate_single_song(model, params, progress_tracker=None, cancellation_toke
     # No artificial cap - let the model use its full capacity
     duration_from_steps = params['max_gen_length'] / 25.0
     
+    try:
+        top_k_value = int(params.get('top_k', -1))
+    except (TypeError, ValueError):
+        top_k_value = -1
+    if top_k_value < 0:
+        top_k_value = -1
+
+    try:
+        top_p_value = float(params.get('top_p', 0.0))
+    except (TypeError, ValueError):
+        top_p_value = 0.0
+
     gen_params = {
         'duration': duration_from_steps,
         'num_steps': params['diffusion_steps'],
         'temperature': params['temperature'],
-        'top_k': params['top_k'],
-        'top_p': params['top_p'],
+        'top_k': top_k_value,
+        'top_p': top_p_value,
         'cfg_coef': params['cfg_coef'],
         'guidance_scale': params['guidance_scale'],
         'use_sampling': params['use_sampling'],
@@ -292,19 +347,11 @@ def generate_single_song(model, params, progress_tracker=None, cancellation_toke
     # Call the model
     # Build description string with extra prompt support
     extra_prompt_text = params.get('extra_prompt', '')
-    user_description = extra_prompt_text.strip() if isinstance(extra_prompt_text, str) else ""
-
-    if params.get('force_extra_prompt') and not user_description:
+    if params.get('force_extra_prompt') and not (extra_prompt_text and extra_prompt_text.strip()):
         print("⚠️ Warning: 'force_extra_prompt' is True but no extra prompt was provided!")
         print("Using fallback placeholder for description...")
 
-    if not user_description:
-        user_description = "."
-
-    if "[Musicality-very-high]" not in user_description:
-        description = f"[Musicality-very-high], {user_description}"
-    else:
-        description = user_description
+    description = compose_description_from_params(params)
     
     # Use audio path if provided
     audio_path = params.get('audio_path', None)
