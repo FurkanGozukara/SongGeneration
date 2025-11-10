@@ -17,6 +17,7 @@ import random
 import argparse
 import threading
 import re
+import shutil
 
 # Import and configure output suppression
 from utils.suppress_output import suppress_output, disable_verbose_logging
@@ -1150,11 +1151,17 @@ def submit_lyrics(
                 audio_data = MODEL(
                     lyric=song_data["lyrics"],
                     description=description_for_generation,
-                    prompt_audio_path=song_data["audio_path"],
+                    prompt_audio_path=song_data["audio_path"] if song_data["sample_prompt"] else None,
                     genre=song_data["auto_prompt_type"] if song_data["auto_prompt_type"] else None,
                     auto_prompt_path=auto_prompt_manager.get_fallback_prompt_path(),
                     gen_type=song_data["gen_type"],
-                    params=gen_params
+                    params=gen_params,
+                    disable_offload=disable_offload,
+                    disable_cache_clear=disable_cache_clear,
+                    disable_fp16=disable_fp16,
+                    disable_sequential=disable_sequential,
+                    progress_callback=progress_callback,
+                    cancellation_token=cancellation_token
                 )
             
             if audio_data is None:
@@ -1484,6 +1491,29 @@ def submit_lyrics(
                     else:
                         mp3_path = None
                         output_messages("✗ Failed to convert main track to MP3")
+                else:
+                    mp3_path = None
+                
+                # Save reference audio copy if available
+                reference_copy_path = None
+                reference_source_path = song_data.get("original_audio_path")
+                processed_reference_path = song_data.get("audio_path")
+                if reference_source_path and os.path.exists(reference_source_path):
+                    reference_copy_path = op.join(output_dir, f"{base_filename}_reference_audio{op.splitext(reference_source_path)[1]}")
+                    try:
+                        shutil.copy(reference_source_path, reference_copy_path)
+                        output_messages(f"✓ Reference audio copied: {op.basename(reference_copy_path)}")
+                    except Exception as ref_err:
+                        reference_copy_path = None
+                        output_messages(f"⚠️ Unable to copy reference audio: {ref_err}")
+                elif processed_reference_path and os.path.exists(processed_reference_path):
+                    reference_copy_path = op.join(output_dir, f"{base_filename}_reference_audio.wav")
+                    try:
+                        shutil.copy(processed_reference_path, reference_copy_path)
+                        output_messages(f"✓ Reference audio copied: {op.basename(reference_copy_path)}")
+                    except Exception as ref_err:
+                        reference_copy_path = None
+                        output_messages(f"⚠️ Unable to copy processed reference audio: {ref_err}")
                     
                     # Separate tracks MP3
                     if gen_type == 'separate':
@@ -1568,7 +1598,7 @@ def submit_lyrics(
 
 # Create Gradio interface
 with gr.Blocks(title="SECourses LeVo Song Generation App",theme=gr.themes.Soft()) as demo:
-    gr.Markdown("# SECourses Premium LeVo Song Generator V7.2 - Up to 4m30s Songs - https://www.patreon.com/posts/135592123")
+    gr.Markdown("# SECourses Premium LeVo Song Generator V7.3 - Up to 4m30s Songs - https://www.patreon.com/posts/135592123")
     
     history = gr.State([])
     session = gr.State({})
@@ -1853,48 +1883,41 @@ with gr.Blocks(title="SECourses LeVo Song Generation App",theme=gr.themes.Soft()
                             outputs=[auto_prompt_type, auto_prompt_status]
                         )
                     
-                    # Reference audio section
-                    with gr.Accordion("📁 Reference Audio/Video (Advanced) - Maximum 10 seconds utilized", open=False):
-                        # Initial file upload to detect type
-                        file_upload = gr.File(
-                            label="Upload Audio or Video File",
-                            file_types=[".mp3", ".wav", ".flac", ".m4a", ".aac", ".ogg", ".opus", ".wma",
-                                       ".mp4", ".avi", ".mov", ".mkv", ".webm", ".flv", ".wmv", ".m4v"],
-                            file_count="single",
-                            visible=True
-                        )
-                        
-                        # Audio component for audio files (with trim feature)
-                        audio_component = gr.Audio(
-                            label="Audio Preview (use trim feature if needed)",
-                            type="filepath",
-                            visible=False
-                        )
-                        
-                        # Hidden component to store the final audio path
-                        audio_path = gr.Textbox(visible=False)
-                        
-                        # Status message
-                        upload_status = gr.Markdown("", visible=False)
-                        
-                        gr.Markdown("""
-                        **Important Notes:**
-                        - Upload a clear audio sample or video with the voice you want to replicate
-                        - Only the first 10 seconds will be used
-                        - Best results with clean vocals (minimal background noise)
-                        - **Supported Audio formats:** WAV, MP3, FLAC, M4A, AAC, OGG, WMA
-                        - **Supported Video formats:** MP4, AVI, MOV, MKV, WebM, FLV, WMV, M4V
-                        - For audio files, you can use the trim feature to select a specific portion
-                        - Processing reference audio may take additional time (Large model provides superior voice cloning)
-                        - Maximum file size: 100MB
-                        """)
-                
                 with gr.Column(scale=1):
                     output_audio = gr.Audio(label="Generated Audio", type="filepath")
                     output_video = gr.Video(label="Generated Video", visible=True)
                     
                     gr.Markdown("---")
                     gr.Markdown("### 🎵 LeVo Models\n**Large** (★★★★★ Best, 22-28GB) | **Base Full** (★★★★ Good, 12-18GB)\nBoth support 4m30s songs • Chinese + English")
+                    
+                    # Reference audio section (moved above image upload)
+                    with gr.Accordion("📁 Reference Audio/Video (Advanced) - Maximum 10 seconds utilized", open=True):
+                        with gr.Row():
+                            file_upload = gr.File(
+                                label="Upload Audio or Video File",
+                                file_types=[".mp3", ".wav", ".flac", ".m4a", ".aac", ".ogg", ".opus", ".wma",
+                                           ".mp4", ".avi", ".mov", ".mkv", ".webm", ".flv", ".wmv", ".m4v"],
+                                file_count="single",
+                                visible=True
+                            )
+                            audio_component = gr.Audio(
+                                label="Audio Preview (trim to best 10 seconds)",
+                                type="filepath",
+                                visible=False
+                            )
+                        audio_path = gr.Textbox(visible=False)
+                        upload_status = gr.Markdown("", visible=False)
+                        
+                        with gr.Accordion("ℹ️ Reference Tips", open=False):
+                            gr.Markdown("""
+                            **Recommended Usage**
+                            - Upload a clean vocal snippet or video clip featuring the target voice
+                            - Only the first 10 seconds are used, so trim to the strongest phrase
+                            - Keep background noise and heavy effects to a minimum
+                            - Supported audio: WAV, MP3, FLAC, M4A, AAC, OGG, WMA
+                            - Supported video: MP4, AVI, MOV, MKV, WebM, FLV, WMV, M4V
+                            - Maximum file size: 100MB
+                            """)
                     
                     # Image input for video generation
                     image_upload = gr.Image(label="Image for Video (optional)", type="filepath")
@@ -1927,7 +1950,7 @@ with gr.Blocks(title="SECourses LeVo Song Generation App",theme=gr.themes.Soft()
                             maximum=6750,  # Max possible for Large/Base Full models
                             value=4500,  # Default to 3 minutes (good balance for Large model)
                             step=100,
-                            info="Large model: up to 6750 steps (4m30s). Default 4500 steps (3min) provides excellent results"
+                            info="Controls song length (~25 steps/sec). 4500 (≈3m) is the balanced default; extend to 5200-6000 for full lyric arcs; 6750 (≈4m30s) is the Large/Base max."
                         )
                         diffusion_steps = gr.Slider(
                             label="Diffusion Steps", 
@@ -1935,7 +1958,7 @@ with gr.Blocks(title="SECourses LeVo Song Generation App",theme=gr.themes.Soft()
                             maximum=200, 
                             value=50, 
                             step=10,
-                            info="VAE denoising steps. 50 = optimal balance (Large model default), 100+ = better quality but 2x slower"
+                            info="Detail polish. 30 = fast sketch, 50 = default, 70-90 = tighter mixes & stronger reference following, 120+ = ultra clean but ~2× slower."
                         )
                 
                     # Sampling parameters
@@ -1946,7 +1969,7 @@ with gr.Blocks(title="SECourses LeVo Song Generation App",theme=gr.themes.Soft()
                             maximum=2.0,
                             value=0.8,
                             step=0.1,
-                            info="Sampling temperature. 0.8 = recommended (official default), <0.8 = more focused, >1.0 = more creative"
+                            info="Variability. 0.6-0.8 keeps lyrics tight, 0.8 (default) balances melody & fidelity, 1.0+ invites wilder phrasing but may drift."
                         )
                         top_k = gr.Slider(
                             label="Top-k Sampling",
@@ -1954,7 +1977,7 @@ with gr.Blocks(title="SECourses LeVo Song Generation App",theme=gr.themes.Soft()
                             maximum=250,
                             value=-1,
                             step=1,
-                            info="Limits sampling to top k tokens (-1 = no limit, official default)"
+                            info="Restricts word choices. -1 keeps full vocab (default). Use 24-64 when you need stricter lyric phrasing or matched cadences; >100 reintroduces freer wording."
                         )
                         top_p = gr.Slider(
                             label="Top-p (Nucleus Sampling)",
@@ -1962,7 +1985,7 @@ with gr.Blocks(title="SECourses LeVo Song Generation App",theme=gr.themes.Soft()
                             maximum=1.0,
                             value=0.0,
                             step=0.05,
-                            info="Cumulative probability cutoff. 0 = use top-k instead"
+                            info="Alternative variety control. Leave at 0 when relying on top-k; set 0.8-0.9 instead of top-k for smooth variation, 0.6-0.75 when prioritising lyric adherence."
                         )
                 
                     # Guidance parameters
@@ -1973,7 +1996,7 @@ with gr.Blocks(title="SECourses LeVo Song Generation App",theme=gr.themes.Soft()
                             maximum=5.0,
                             value=1.5,
                             step=0.1,
-                            info="Classifier-free guidance for text conditioning. 1.5 = optimal (Large model default), higher = stronger prompt adherence"
+                            info="How closely vocals follow your text. 1.5 default; raise to 1.8-2.2 when the model drifts from lyrics; >2.4 can sound brittle; drop to 1.2 for freer improv."
                         )
                         guidance_scale = gr.Slider(
                             label="Diffusion Guidance Scale",
@@ -1981,41 +2004,9 @@ with gr.Blocks(title="SECourses LeVo Song Generation App",theme=gr.themes.Soft()
                             maximum=5.0,
                             value=1.5,
                             step=0.1,
-                            info="Audio VAE diffusion guidance. 1.5 = optimal (Large model default), controls audio quality vs prompt adherence"
+                            info="Balances clarity vs creativity during diffusion. 1.5 default clarity; 1.8-2.1 locks tighter to reference audio & vocal tone; <1.3 softens for vibe; >2.5 may add hiss."
                         )
-                
-                with gr.Column():
-                    gr.Markdown("""
-                    ### 🎵 Supported Models (Both 6750 steps = 4m30s)
-                    
-                    **1. Large Model (Default & Recommended)**
-                    - **Quality**: ★★★★★ BEST
-                    - **VRAM**: 22-28GB (RTX 4090, A100)
-                    - **Max Length**: 6750 steps (270s / 4m30s)
-                    - **Best for**: Maximum quality, full-length songs
-                    
-                    **2. Base Full Model**
-                    - **Quality**: ★★★★ GOOD
-                    - **VRAM**: 12-18GB (RTX 3090, 4080)
-                    - **Max Length**: 6750 steps (270s / 4m30s)
-                    - **Best for**: Lower VRAM systems
-                    
-                    ---
-                    
-                    ### 📏 Generation Length Guide
-                    - 2000 steps ≈ 80s (1m20s) - Short songs
-                    - 3000 steps ≈ 120s (2m) - Standard length
-                    - **4500 steps ≈ 180s (3m) - Default (optimal)**
-                    - 6000 steps ≈ 240s (4m) - Extended songs
-                    - 6750 steps ≈ 270s (4m30s) - Maximum ✨
-                    
-                    ### ⚙️ Diffusion Steps
-                    - 20-30 steps: Fast, good quality
-                    - **50 steps: Balanced (default)**
-                    - 100+ steps: Best quality, 2x slower
-                    
-                    💡 **Tip**: Defaults (4500 steps, 50 diffusion) optimized for both models
-                    """)
+
                 
                 with gr.Column():
                     gr.Markdown("### 🎮 VRAM Optimization")
@@ -2037,7 +2028,7 @@ with gr.Blocks(title="SECourses LeVo Song Generation App",theme=gr.themes.Soft()
                         use_sampling = gr.Checkbox(
                             label="Use Sampling",
                             value=True,
-                            info="Enable probabilistic sampling. Always keep enabled for Large model (required for quality)"
+                            info="Switches between stochastic sampling and greedy argmax inside `LmModel.generate`; leave on for musical variety, disable only for deterministic debugging."
                         )
                         extend_stride = gr.Slider(
                             label="Extend Stride",
@@ -2045,7 +2036,7 @@ with gr.Blocks(title="SECourses LeVo Song Generation App",theme=gr.themes.Soft()
                             maximum=30,
                             value=5,
                             step=1,
-                            info="Context overlap for extended generation. 5 = default. Not needed for Large model's 4m30s single-pass generation"
+                            info="Controls the diffusion crossfade overlap (seconds) used when stitching latent windows; higher values smooth transitions, lower values keep sharper segment changes."
                         )
                 
                     # Processing options
@@ -2069,7 +2060,7 @@ with gr.Blocks(title="SECourses LeVo Song Generation App",theme=gr.themes.Soft()
                         record_tokens = gr.Checkbox(
                             label="Record Tokens",
                             value=True,
-                            info="Record generation tokens for analysis"
+                            info="Stores the raw token stream from `LmModel.generate` for metadata/debug analysis; slightly increases VRAM/runtime usage."
                         )
                         record_window = gr.Slider(
                             label="Record Window",
@@ -2077,7 +2068,7 @@ with gr.Blocks(title="SECourses LeVo Song Generation App",theme=gr.themes.Soft()
                             maximum=200,
                             value=50,
                             step=10,
-                            info="Number of tokens to record"
+                            info="When recording tokens, pass the last N tokens to the sampler (`record_token_pool[-record_window:]`) for repetition checks; higher values mean more context but more memory."
                         )
             
         with gr.TabItem("📁 Batch Processing"):

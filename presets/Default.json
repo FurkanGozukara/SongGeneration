@@ -7,6 +7,7 @@
   "timbre": "bright",
   "gender": "male",
   "extra_prompt": "",
+  "include_dropdown_attributes": false,
   "force_extra_prompt": false,
   "audio_path": null,
   "image_path": null,
@@ -15,9 +16,10 @@
   "num_generations": 1,
   "loop_presets": false,
   "randomize_params": false,
+  "duration_seconds": 180,
   "max_gen_length": 4500,
   "diffusion_steps": 50,
-  "temperature": 1,
+  "temperature": 0.8,
   "top_k": 50,
   "top_p": 0,
   "cfg_coef": 1.5,
@@ -32,5 +34,7 @@
   "disable_offload": false,
   "disable_cache_clear": false,
   "disable_fp16": false,
-  "disable_sequential": false
+  "disable_sequential": false,
+  "auto_prompt_enabled": false,
+  "auto_prompt_type": "Auto"
 }

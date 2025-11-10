@@ -271,9 +271,17 @@ class CodecLM:
         return gen_tokens
 
     @torch.no_grad()
-    def generate_audio(self, gen_tokens: torch.Tensor, prompt=None, vocal_prompt=None, bgm_prompt=None, chunked=False, chunk_size=128, gen_type='mixed', num_steps=50, guidance_scale=1.5):
+    def generate_audio(self, gen_tokens: torch.Tensor, prompt=None, vocal_prompt=None, bgm_prompt=None, chunked=False, chunk_size=128, gen_type='mixed', num_steps=50, guidance_scale=1.5, extend_stride=None, progress_callback=None):
         """Generate Audio from tokens"""
         assert gen_tokens.dim() == 3
+        if extend_stride is None:
+            extend_stride_value = self.extend_stride
+        else:
+            try:
+                extend_stride_value = float(extend_stride)
+            except (TypeError, ValueError):
+                extend_stride_value = self.extend_stride
+        extend_stride_value = max(0.0, min(extend_stride_value, self.max_duration))
         if self.seperate_tokenizer is not None:
             gen_tokens_song = gen_tokens[:, [0], :]
             gen_tokens_vocal = gen_tokens[:, [1], :]
@@ -288,8 +296,27 @@ class CodecLM:
                     bgm_prompt = torch.zeros_like(bgm_prompt)
             else:
                 assert gen_type == 'mixed', f"gen_type {gen_type} not supported"
-            gen_audio_seperate = self.seperate_tokenizer.decode([gen_tokens_vocal, gen_tokens_bgm], vocal_prompt, bgm_prompt, chunked=chunked, chunk_size=chunk_size, num_steps=num_steps, guidance_scale=guidance_scale)
+            gen_audio_seperate = self.seperate_tokenizer.decode(
+                [gen_tokens_vocal, gen_tokens_bgm],
+                vocal_prompt,
+                bgm_prompt,
+                chunked=chunked,
+                chunk_size=chunk_size,
+                num_steps=num_steps,
+                guidance_scale=guidance_scale,
+                extend_stride=extend_stride_value,
+                progress_callback=progress_callback,
+            )
             return gen_audio_seperate
         else:
-            gen_audio = self.audiotokenizer.decode(gen_tokens, prompt)
+            gen_audio = self.audiotokenizer.decode(
+                gen_tokens,
+                prompt,
+                chunked=chunked,
+                chunk_size=chunk_size,
+                num_steps=num_steps,
+                guidance_scale=guidance_scale,
+                extend_stride=extend_stride_value,
+                progress_callback=progress_callback,
+            )
             return gen_audio

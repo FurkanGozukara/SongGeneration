@@ -129,11 +129,23 @@ class Tango:
         return codes
 
     @torch.no_grad()
-    def code2sound(self, codes, prompt=None, duration=40, guidance_scale=1.5, num_steps=20, disable_progress=False):
+    def code2sound(
+        self,
+        codes,
+        prompt=None,
+        duration=40,
+        guidance_scale=1.5,
+        num_steps=20,
+        disable_progress=False,
+        extend_stride=5.0,
+        progress_callback=None,
+    ):
         codes = codes.to(self.device)
 
         min_samples = int(duration * 25) # 40ms per frame
         hop_samples = min_samples // 4 * 3
+        stride_tokens = max(1, min(int(round(float(extend_stride) * 25)), min_samples - 1))
+        hop_samples = max(min_samples - stride_tokens, 1)
         ovlp_samples = min_samples - hop_samples
         hop_frames = hop_samples
         ovlp_frames = ovlp_samples
@@ -193,13 +205,17 @@ class Tango:
         latent_list = []
         spk_embeds = torch.zeros([1, 32, 1, 32], device=codes.device)
         with torch.autocast(device_type="cuda", dtype=torch.float16):
-            for sinx in range(0, codes.shape[-1]-hop_samples, hop_samples):
+            chunk_starts = list(range(0, max(1, codes.shape[-1] - hop_samples + 1), hop_samples))
+            if not chunk_starts:
+                chunk_starts = [0]
+            total_chunks = len(chunk_starts)
+            for chunk_idx, sinx in enumerate(chunk_starts):
                 codes_input=[]
                 codes_input.append(codes[:,:,sinx:sinx+min_samples])
                 if(sinx == 0):
                     # print("Processing {} to {}".format(sinx/self.sample_rate, (sinx + min_samples)/self.sample_rate))
                     incontext_length = first_latent_length
-                    latents = self.model.inference_codes(codes_input, spk_embeds, first_latent, latent_length, incontext_length=incontext_length, additional_feats=[], guidance_scale=1.5, num_steps = num_steps, disable_progress=disable_progress, scenario='other_seg')
+                    latents = self.model.inference_codes(codes_input, spk_embeds, first_latent, latent_length, incontext_length=incontext_length, additional_feats=[], guidance_scale=guidance_scale, num_steps = num_steps, disable_progress=disable_progress, scenario='other_seg')
                     latent_list.append(latents)
                 else:
                     # print("Processing {} to {}".format(sinx/self.sample_rate, (sinx + min_samples)/self.sample_rate))
@@ -210,14 +226,16 @@ class Tango:
                     # exit()
                     incontext_length = true_latent.shape[-2]
                     true_latent = torch.cat([true_latent, torch.randn(true_latent.shape[0],  len_add_to_1000, true_latent.shape[-1]).to(self.device)], -2)
-                    latents = self.model.inference_codes(codes_input, spk_embeds, true_latent, latent_length, incontext_length=incontext_length,  additional_feats=[], guidance_scale=1.5, num_steps = num_steps, disable_progress=disable_progress, scenario='other_seg')
+                    latents = self.model.inference_codes(codes_input, spk_embeds, true_latent, latent_length, incontext_length=incontext_length,  additional_feats=[], guidance_scale=guidance_scale, num_steps = num_steps, disable_progress=disable_progress, scenario='other_seg')
                     latent_list.append(latents)
+                if progress_callback:
+                    progress_callback(chunk_idx + 1, total_chunks)
 
         latent_list = [l.float() for l in latent_list]
         latent_list[0] = latent_list[0][:,:,first_latent_length:]
-        min_samples =  int(min_samples * self.sample_rate // 1000 * 40)
+        min_samples = int(min_samples * self.sample_rate // 1000 * 40)
         hop_samples = int(hop_samples * self.sample_rate // 1000 * 40)
-        ovlp_samples = min_samples - hop_samples
+        ovlp_samples = max(min_samples - hop_samples, 1)
         with torch.no_grad():
             output = None
             for i in range(len(latent_list)):
@@ -247,10 +265,18 @@ class Tango:
         return input_audios.reshape(input_audios.shape[0], nchan, -1)/norm_value.unsqueeze(-1).unsqueeze(-1)
     
     @torch.no_grad()
-    def sound2sound(self, sound, prompt=None, steps=50, disable_progress=False):
+    def sound2sound(self, sound, prompt=None, steps=50, disable_progress=False, extend_stride=5.0, progress_callback=None):
         codes = self.sound2code(sound)
         # print(codes.shape)
-        wave = self.code2sound(codes, prompt, guidance_scale=1.5, num_steps=steps, disable_progress=disable_progress)
+        wave = self.code2sound(
+            codes,
+            prompt,
+            guidance_scale=guidance_scale,
+            num_steps=steps,
+            disable_progress=disable_progress,
+            extend_stride=extend_stride,
+            progress_callback=progress_callback,
+        )
         # print(fname, wave.shape)
         return wave
 

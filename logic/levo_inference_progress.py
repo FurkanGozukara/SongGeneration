@@ -140,6 +140,12 @@ class LeVoInferenceWithProgress(torch.nn.Module):
         chunked = params.pop('chunked', True)
         chunk_size = params.pop('chunk_size', 128)
         params = {**self.default_params, **params}
+        extend_stride_value = params.get('extend_stride', self.default_params.get('extend_stride', 5))
+        try:
+            extend_stride_value = float(extend_stride_value)
+        except (TypeError, ValueError):
+            extend_stride_value = self.default_params.get('extend_stride', 5)
+        extend_stride_value = max(0.0, min(extend_stride_value, self.max_duration))
         model.set_generation_params(**params)
 
         generate_inp = {
@@ -219,16 +225,32 @@ class LeVoInferenceWithProgress(torch.nn.Module):
             seperate_tokenizer = seperate_tokenizer,
         )
 
+        def diffusion_chunk_progress(completed_chunks: int, total_chunks: int):
+            if not progress_callback:
+                return
+            total_chunks = max(total_chunks, 1)
+            completed_chunks = max(0, min(completed_chunks, total_chunks))
+            progress_fraction = min(0.99, completed_chunks / float(total_chunks))
+            progress_callback({
+                'phase': 'Diffusion',
+                'message': f'Running {num_steps} diffusion steps... segment {completed_chunks}/{total_chunks}',
+                'progress': progress_fraction
+            })
+
         with torch.no_grad():
             if melody_is_wav:
                 wav_seperate = model.generate_audio(tokens, pmt_wav, vocal_wav, bgm_wav, 
                                                   gen_type=gen_type, chunked=chunked, 
                                                   chunk_size=chunk_size, num_steps=num_steps, 
-                                                  guidance_scale=guidance_scale)
+                                                  guidance_scale=guidance_scale,
+                                                  extend_stride=extend_stride_value,
+                                                  progress_callback=diffusion_chunk_progress)
             else:
                 wav_seperate = model.generate_audio(tokens, gen_type=gen_type, 
                                                   chunked=chunked, chunk_size=chunk_size, 
-                                                  num_steps=num_steps, guidance_scale=guidance_scale)
+                                                  num_steps=num_steps, guidance_scale=guidance_scale,
+                                                  extend_stride=extend_stride_value,
+                                                  progress_callback=diffusion_chunk_progress)
 
         if offload_wav_tokenizer_diffusion:
             sep_offload_profiler.reset_empty_cache_mem_line()

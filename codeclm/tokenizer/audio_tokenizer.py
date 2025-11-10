@@ -134,9 +134,24 @@ class Flow1dVAE1rvq(AudioTokenizer):
 
     
     @torch.no_grad()    
-    def decode(self, codes: torch.Tensor, prompt = None, scale: tp.Optional[torch.Tensor] = None, ncodes=9):
-        wav = self.model.code2sound(codes, prompt=prompt, guidance_scale=1.5, 
-                                    num_steps=50, disable_progress=False) # [B,N,T] -> [B,T]
+    def decode(
+        self,
+        codes: torch.Tensor,
+        prompt=None,
+        scale: tp.Optional[torch.Tensor] = None,
+        ncodes=9,
+        extend_stride=5.0,
+        progress_callback=None,
+    ):
+        wav = self.model.code2sound(
+            codes,
+            prompt=prompt,
+            guidance_scale=1.5,
+            num_steps=50,
+            disable_progress=False,
+            extend_stride=extend_stride,
+            progress_callback=progress_callback,
+        ) # [B,N,T] -> [B,T]
         return wav[None]
 
     
@@ -220,9 +235,30 @@ class Flow1dVAESeparate(AudioTokenizer):
         return codes_vocal, codes_bgm
     
     @torch.no_grad()    
-    def decode(self, codes: torch.Tensor, prompt_vocal = None, prompt_bgm = None, chunked=False, chunk_size=128, num_steps=50, guidance_scale=1.5):
-        wav = self.model.code2sound(codes, prompt_vocal=prompt_vocal, prompt_bgm=prompt_bgm, guidance_scale=guidance_scale, 
-                                    num_steps=num_steps, disable_progress=False, chunked=chunked, chunk_size=chunk_size) # [B,N,T] -> [B,T]
+    def decode(
+        self,
+        codes: torch.Tensor,
+        prompt_vocal=None,
+        prompt_bgm=None,
+        chunked=False,
+        chunk_size=128,
+        num_steps=50,
+        guidance_scale=1.5,
+        extend_stride=5.0,
+        progress_callback=None,
+    ):
+        wav = self.model.code2sound(
+            codes,
+            prompt_vocal=prompt_vocal,
+            prompt_bgm=prompt_bgm,
+            guidance_scale=guidance_scale,
+            num_steps=num_steps,
+            disable_progress=False,
+            chunked=chunked,
+            chunk_size=chunk_size,
+            extend_stride=extend_stride,
+            progress_callback=progress_callback,
+        )  # [B,N,T] -> [B,T]
         return wav[None]
 
     
