@@ -84,7 +84,7 @@ MAX_GENERATION_LENGTHS = {
 
 DEFAULT_MAX_GENERATION_STEPS = max(MAX_GENERATION_LENGTHS.values())
 STEPS_PER_SECOND = 25.0
-MIN_GENERATION_STEPS = 2000
+MIN_GENERATION_STEPS = 250
 DEFAULT_GENERATION_STEPS = 4500
 MIN_DURATION_SECONDS = int(MIN_GENERATION_STEPS / STEPS_PER_SECOND)
 DEFAULT_DURATION_SECONDS = int(DEFAULT_GENERATION_STEPS / STEPS_PER_SECOND)
@@ -1946,7 +1946,7 @@ with gr.Blocks(title="SECourses LeVo Song Generation App",theme=gr.themes.Soft()
                     with gr.Row():
                         max_gen_length = gr.Slider(
                             label="Max Generation Length (Steps)", 
-                            minimum=2000, 
+                            minimum=MIN_GENERATION_STEPS, 
                             maximum=6750,  # Max possible for Large/Base Full models
                             value=4500,  # Default to 3 minutes (good balance for Large model)
                             step=100,
