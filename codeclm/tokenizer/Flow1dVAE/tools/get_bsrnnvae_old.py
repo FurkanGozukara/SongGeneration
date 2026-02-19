@@ -405,7 +405,7 @@ if __name__ == '__main__':
 
     s = 0
     for param in model.parameters():
-        s += np.product(param.size())
+        s += np.prod(param.size())
     print('# of parameters: '+str(s/1e6)+" M")
 
     output = model(x)

@@ -100,7 +100,7 @@ class MusicFMModel(BaseFairseqModel):
         import numpy as np
         s = 0
         for param in model.parameters():
-            s += np.product(param.size())
+            s += np.prod(param.size())
         print('# of parameters: '+str(s/1024.0/1024.0))
         return model
 
