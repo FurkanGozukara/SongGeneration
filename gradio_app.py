@@ -1393,7 +1393,11 @@ def submit_lyrics(
                             genre=None,
                             auto_prompt_path=None,
                             gen_type='vocal',
-                            params=gen_params
+                            params=gen_params,
+                            disable_offload=disable_offload,
+                            disable_cache_clear=disable_cache_clear,
+                            disable_fp16=disable_fp16,
+                            disable_sequential=disable_sequential
                         )
                         
                         if vocal_audio_data is not None:
@@ -1407,7 +1411,11 @@ def submit_lyrics(
                             genre=None,
                             auto_prompt_path=None,
                             gen_type='bgm',
-                            params=gen_params
+                            params=gen_params,
+                            disable_offload=disable_offload,
+                            disable_cache_clear=disable_cache_clear,
+                            disable_fp16=disable_fp16,
+                            disable_sequential=disable_sequential
                         )
                         
                         if bgm_audio_data is not None:
