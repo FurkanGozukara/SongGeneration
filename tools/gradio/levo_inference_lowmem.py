@@ -18,6 +18,7 @@ from codeclm.utils.offload_profiler import OffloadProfiler, OffloadParamParse
 # Import suppression utilities
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 from utils.suppress_output import suppress_output, disable_verbose_logging
+from utils.torch_load import load_torch_file
 
 
 class LeVoInference(torch.nn.Module):
@@ -162,7 +163,7 @@ class LeVoInference(torch.nn.Module):
                 raise
         elif genre is not None and auto_prompt_path is not None:
             with suppress_output():
-                auto_prompt = torch.load(auto_prompt_path)
+                auto_prompt = load_torch_file(auto_prompt_path, map_location='cpu')
             merge_prompt = [item for sublist in auto_prompt.values() for item in sublist]
             if genre == "Auto": 
                 prompt_token = merge_prompt[np.random.randint(0, len(merge_prompt))]

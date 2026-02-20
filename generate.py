@@ -15,6 +15,7 @@ import gc
 from codeclm.trainer.codec_song_pl import CodecLM_PL
 from codeclm.models import CodecLM
 from utils.suppress_output import suppress_output, disable_verbose_logging
+from utils.torch_load import load_torch_file
 
 # Add ckpt directory to Python path for third_party imports
 ckpt_dir = Path(__file__).parent / "ckpt"
@@ -108,7 +109,7 @@ def generate(args):
 
     with suppress_output():
         separator = Separator()
-        auto_prompt = torch.load('ckpt/prompt.pt')
+        auto_prompt = load_torch_file('ckpt/prompt.pt', map_location='cpu')
         audio_tokenizer = builders.get_audio_tokenizer_model(cfg.audio_tokenizer_checkpoint, cfg)
         audio_tokenizer = audio_tokenizer.eval().cuda()
     merge_prompt = [item for sublist in auto_prompt.values() for item in sublist]
@@ -319,7 +320,7 @@ def generate_lowmem(args):
             audio_tokenizer = builders.get_audio_tokenizer_model(cfg.audio_tokenizer_checkpoint, cfg)
             audio_tokenizer = audio_tokenizer.eval().cuda()
     with suppress_output():
-        auto_prompt = torch.load('ckpt/prompt.pt')
+        auto_prompt = load_torch_file('ckpt/prompt.pt', map_location='cpu')
     merge_prompt = [item for sublist in auto_prompt.values() for item in sublist]
     new_items = []
     for line in lines:

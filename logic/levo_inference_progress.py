@@ -6,6 +6,7 @@ import json
 import numpy as np
 from omegaconf import OmegaConf
 from typing import Optional, Callable
+from utils.torch_load import load_torch_file
 
 from codeclm.trainer.codec_song_pl import CodecLM_PL
 from codeclm.models import CodecLM
@@ -87,7 +88,7 @@ class LeVoInferenceWithProgress(torch.nn.Module):
             if not disable_cache_clear:
                 torch.cuda.empty_cache()
         elif genre is not None and auto_prompt_path is not None:
-            auto_prompt = torch.load(auto_prompt_path)
+            auto_prompt = load_torch_file(auto_prompt_path, map_location='cpu')
             merge_prompt = [item for sublist in auto_prompt.values() for item in sublist]
             if genre == "Auto": 
                 prompt_token = merge_prompt[np.random.randint(0, len(merge_prompt))]

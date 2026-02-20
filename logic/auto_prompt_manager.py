@@ -2,6 +2,7 @@ import os
 import torch
 import numpy as np
 from typing import Optional, Dict, List, Tuple
+from utils.torch_load import load_torch_file
 
 class AutoPromptManager:
     """Manages automatic prompt audio selection based on genre/style"""
@@ -25,10 +26,10 @@ class AutoPromptManager:
         try:
             # Try loading from tools directory first
             if os.path.exists(self.auto_prompt_path):
-                self.auto_prompt_data = torch.load(self.auto_prompt_path, map_location='cpu')
+                self.auto_prompt_data = load_torch_file(self.auto_prompt_path, map_location='cpu')
                 print(f"✓ Auto prompt data loaded from: {self.auto_prompt_path}")
             elif os.path.exists(self.ckpt_prompt_path):
-                self.auto_prompt_data = torch.load(self.ckpt_prompt_path, map_location='cpu')
+                self.auto_prompt_data = load_torch_file(self.ckpt_prompt_path, map_location='cpu')
                 print(f"✓ Auto prompt data loaded from: {self.ckpt_prompt_path}")
             else:
                 print("⚠️ Auto prompt data not found - auto prompt selection disabled")

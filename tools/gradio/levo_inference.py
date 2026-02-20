@@ -7,6 +7,7 @@ import json
 import re
 import numpy as np
 from omegaconf import OmegaConf
+from utils.torch_load import load_torch_file
 
 from codeclm.trainer.codec_song_pl import CodecLM_PL
 from codeclm.models import CodecLM
@@ -86,7 +87,7 @@ class LeVoInference(torch.nn.Module):
             pmt_wav, vocal_wav, bgm_wav = self.separator.run(prompt_audio_path)
             melody_is_wav = True
         elif genre is not None and auto_prompt_path is not None:
-            auto_prompt = torch.load(auto_prompt_path)
+            auto_prompt = load_torch_file(auto_prompt_path, map_location='cpu')
             prompt_token = None
 
             if genre == "Auto":
