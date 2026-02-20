@@ -419,6 +419,8 @@ class LlamaAttention(nn.Module):
             o_proj_slices = self.o_proj.weight.split(self.hidden_size // self.config.pretraining_tp, dim=1)
             attn_output = sum([F.linear(attn_output[i], o_proj_slices[i]) for i in range(self.config.pretraining_tp)])
         else:
+            if attn_output.dtype != self.o_proj.weight.dtype:
+                attn_output = attn_output.to(self.o_proj.weight.dtype)
             attn_output = self.o_proj(attn_output)
 
         if not output_attentions:
@@ -506,6 +508,9 @@ class LlamaFlashAttention2(LlamaAttention):
         )
 
         attn_output = attn_output.reshape(bsz, q_len, self.hidden_size).contiguous()
+        # Align activation dtype with projection weights to avoid Half/Float matmul mismatch.
+        if attn_output.dtype != self.o_proj.weight.dtype:
+            attn_output = attn_output.to(self.o_proj.weight.dtype)
         attn_output = self.o_proj(attn_output)
 
         if not output_attentions:
