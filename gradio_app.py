@@ -95,6 +95,8 @@ APP_DIR = op.dirname(op.abspath(__file__))
 # Parse command line arguments
 parser = argparse.ArgumentParser(description='LeVo Song Generation App')
 parser.add_argument('--share', action='store_true', help='Share the Gradio app publicly')
+parser.add_argument('--host', type=str, default=None, help='Optional Gradio server host (e.g. 0.0.0.0)')
+parser.add_argument('--port', type=int, default=None, help='Optional Gradio server port')
 args = parser.parse_args()
 
 # Model version detection and validation
@@ -936,18 +938,10 @@ def process_reference_audio(audio_path, auto_prompt_enabled, auto_prompt_type, g
         except Exception as e:
             return None, None, None, False, f"⚠️ Reference audio error: {str(e)}", None
     
-    # If no manual audio (or not provided), fall back to auto prompt if enabled
-    if auto_prompt_enabled and auto_prompt_manager.is_available():
-        try:
-            prompt_tokens = auto_prompt_manager.get_auto_prompt_tokens(auto_prompt_type)
-            if prompt_tokens:
-                pmt_wav, vocal_wav, bgm_wav = prompt_tokens
-                return pmt_wav, vocal_wav, bgm_wav, True, f"✓ Using auto prompt: {auto_prompt_type}", None
-            else:
-                return None, None, None, False, f"⚠️ Auto prompt '{auto_prompt_type}' not available", None
-        except Exception as e:
-            return None, None, None, False, f"⚠️ Auto prompt error: {str(e)}", None
-    
+    # Auto prompt checkpoint loading is disabled. Use manual reference audio/video instead.
+    if auto_prompt_enabled:
+        return None, None, None, False, "Auto prompt is disabled. Upload reference audio/video to guide style.", None
+
     # No reference audio
     return None, None, None, False, "", None
 
@@ -1062,7 +1056,7 @@ def submit_lyrics(
         "melody_is_wav": bool(processed_audio_path),
         "time": current_time,
         "gen_type": gen_type,
-        "auto_prompt_type": auto_prompt_type if auto_prompt_enabled else None,
+        "auto_prompt_type": None,
         "include_dropdown_attributes": include_dropdown_attributes,
         "duration_seconds": duration_from_steps
     }
@@ -1152,8 +1146,8 @@ def submit_lyrics(
                     lyric=song_data["lyrics"],
                     description=description_for_generation,
                     prompt_audio_path=song_data["audio_path"] if song_data["sample_prompt"] else None,
-                    genre=song_data["auto_prompt_type"] if song_data["auto_prompt_type"] else None,
-                    auto_prompt_path=auto_prompt_manager.get_fallback_prompt_path(),
+                    genre=None,
+                    auto_prompt_path=None,
                     gen_type=song_data["gen_type"],
                     params=gen_params,
                     disable_offload=disable_offload,
@@ -1396,8 +1390,8 @@ def submit_lyrics(
                             lyric=song_data["lyrics"],
                             description=generation_description,
                             prompt_audio_path=song_data["audio_path"],
-                            genre=song_data["auto_prompt_type"] if song_data["auto_prompt_type"] else None,
-                            auto_prompt_path=auto_prompt_manager.get_fallback_prompt_path(),
+                            genre=None,
+                            auto_prompt_path=None,
                             gen_type='vocal',
                             params=gen_params
                         )
@@ -1410,8 +1404,8 @@ def submit_lyrics(
                             lyric=song_data["lyrics"],
                             description=generation_description,
                             prompt_audio_path=song_data["audio_path"],
-                            genre=song_data["auto_prompt_type"] if song_data["auto_prompt_type"] else None,
-                            auto_prompt_path=auto_prompt_manager.get_fallback_prompt_path(),
+                            genre=None,
+                            auto_prompt_path=None,
                             gen_type='bgm',
                             params=gen_params
                         )
@@ -1856,7 +1850,8 @@ with gr.Blocks(title="SECourses LeVo Song Generation App",theme=gr.themes.Soft()
                             auto_prompt_enabled = gr.Checkbox(
                                 label="Use Auto Prompt Audio",
                                 value=False,
-                                info="Automatically select reference audio based on genre/style"
+                                interactive=False,
+                                info="Disabled. Upload reference audio/video to guide style."
                             )
                             # Get available types and ensure "Auto" is always included
                             available_types = auto_prompt_manager.get_available_types() if auto_prompt_manager.is_available() else []
@@ -1869,6 +1864,7 @@ with gr.Blocks(title="SECourses LeVo Song Generation App",theme=gr.themes.Soft()
                                 choices=dropdown_choices,
                                 value="Auto",
                                 visible=False,
+                                interactive=False,
                                 info="Select musical style for automatic reference audio"
                             )
                         
@@ -3023,4 +3019,12 @@ with gr.Blocks(title="SECourses LeVo Song Generation App",theme=gr.themes.Soft()
     )
 
 if __name__ == "__main__":
-    demo.launch(inbrowser=True, share=args.share)
+    launch_kwargs = {
+        "inbrowser": True,
+        "share": args.share,
+    }
+    if args.host:
+        launch_kwargs["server_name"] = args.host
+    if args.port is not None:
+        launch_kwargs["server_port"] = args.port
+    demo.launch(**launch_kwargs)

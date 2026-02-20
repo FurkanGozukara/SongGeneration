@@ -17,9 +17,8 @@ class AutoPromptManager:
         self.auto_prompt_path = os.path.join(app_dir, 'tools', 'new_prompt.pt')
         self.ckpt_prompt_path = os.path.join(app_dir, 'ckpt', 'prompt.pt')
         self.auto_prompt_data = None
-        
-        # Load auto prompt data
-        self._load_auto_prompt_data()
+        # Auto prompt loading is intentionally disabled in the UI flow.
+        # The app uses manual reference audio uploads instead.
     
     def _load_auto_prompt_data(self):
         """Load auto prompt data from checkpoint"""
