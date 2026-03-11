@@ -86,6 +86,54 @@ class GradioProgressTracker:
 
 def create_progress_callback(progress_tracker: GradioProgressTracker, progress_bar: gr.Progress = None):
     """Create a progress callback function for the model"""
+    console_state = {
+        "last_len": 0,
+        "completed": False,
+    }
+
+    def _format_seconds(seconds: Optional[float]) -> str:
+        if seconds is None:
+            return "--:--"
+        try:
+            seconds = max(0.0, float(seconds))
+        except (TypeError, ValueError):
+            return "--:--"
+        minutes = int(seconds // 60)
+        secs = int(seconds % 60)
+        return f"{minutes:02d}:{secs:02d}"
+
+    def _render_console_line(progress_info: Dict[str, Any]) -> str:
+        progress = progress_info.get("progress")
+        if progress is None:
+            progress = progress_tracker.current_progress / 100.0
+        progress = max(0.0, min(float(progress), 1.0))
+        percent = int(progress * 100)
+
+        phase = progress_info.get("phase") or progress_tracker.phase or "Processing"
+        message = progress_info.get("message") or progress_tracker.message or ""
+
+        current = progress_info.get("current_step")
+        total = progress_info.get("total_steps")
+        step_text = ""
+        if current is not None and total:
+            step_text = f" | {int(current)}/{int(total)}"
+
+        speed = progress_info.get("speed")
+        speed_text = f" | {speed}" if speed else ""
+
+        eta_seconds = progress_info.get("eta_seconds")
+        if eta_seconds is None and progress > 0 and progress_tracker.start_time:
+            elapsed = max(0.0, time.time() - progress_tracker.start_time)
+            eta_seconds = (elapsed * (1.0 - progress)) / progress
+        eta_text = f" | ETA {_format_seconds(eta_seconds)}"
+
+        elapsed_seconds = progress_info.get("elapsed_seconds")
+        if elapsed_seconds is None and progress_tracker.start_time:
+            elapsed_seconds = max(0.0, time.time() - progress_tracker.start_time)
+        elapsed_text = f" | Elapsed {_format_seconds(elapsed_seconds)}" if elapsed_seconds is not None else ""
+
+        return f"[{percent:3d}%] {phase}: {message}{step_text}{speed_text}{eta_text}{elapsed_text}"
+
     def callback(progress_info: Dict[str, Any]):
         # Update tracker
         progress_tracker.update(progress_info)
@@ -124,16 +172,31 @@ def create_progress_callback(progress_tracker: GradioProgressTracker, progress_b
             # Combine all parts
             message = " | ".join(filter(None, message_parts))
             progress_bar(progress, desc=message)
-            
-        # Also update via gr.Info for visibility of important messages
-        if 'message' in progress_info and progress_info['message'] and 'Running' in progress_info['message']:
-            gr.Info(progress_info['message'])
-            
-        # Print to console as well
-        if progress_info.get('detailed_status'):
-            print(f"Progress: {progress_info['detailed_status']}")
-        else:
-            print(f"Progress: {progress_tracker.get_progress_text()}")
+
+        # Console rendering: single updating line with percentage + ETA + speed.
+        line = _render_console_line(progress_info)
+        padded = line
+        if console_state["last_len"] > len(line):
+            padded += " " * (console_state["last_len"] - len(line))
+        print("\r" + padded, end="", flush=True)
+        console_state["last_len"] = len(line)
+
+        progress_value = progress_info.get("progress")
+        is_complete = False
+        try:
+            if progress_value is not None and float(progress_value) >= 1.0:
+                is_complete = True
+        except (TypeError, ValueError):
+            is_complete = False
+
+        if progress_info.get("phase") == "Complete":
+            is_complete = True
+
+        if is_complete and not console_state["completed"]:
+            print("", flush=True)
+            console_state["completed"] = True
+        elif not is_complete:
+            console_state["completed"] = False
         
     return callback
 

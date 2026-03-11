@@ -251,10 +251,12 @@ class CodecLM:
 
         def _progress_callback(generated_tokens: int, tokens_to_generate: int):
             generated_tokens += current_gen_offset
+            callback_total = max(1, int(tokens_to_generate))
+            callback_generated = max(0, min(int(generated_tokens), callback_total))
             if self._progress_callback is not None:
                 # Note that total_gen_len might be quite wrong depending on the
                 # codebook pattern used, but with delay it is almost accurate.
-                self._progress_callback(generated_tokens, total_gen_len)
+                self._progress_callback(callback_generated, callback_total)
             else:
                 print(f'{generated_tokens: 6d} / {total_gen_len: 6d}', end='\r')
 
@@ -265,6 +267,7 @@ class CodecLM:
                                               descriptions=descriptions, 
                                               audio_qt_embs=audio_qt_embs, 
                                               max_gen_len=total_gen_len, 
+                                              progress_callback=_progress_callback,
                                               **self.generation_params)
         else:
             raise NotImplementedError(f"duration {self.duration} < max duration {self.max_duration}")

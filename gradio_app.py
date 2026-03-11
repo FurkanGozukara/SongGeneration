@@ -33,7 +33,6 @@ from logic.batch_processing import BatchProcessor
 from logic.ui_progress import GradioProgressTracker, create_progress_callback, format_eta
 from logic.preset_manager import PresetManager
 from logic.progress_interceptor import intercept_progress
-from logic.audio_separator import AudioSeparator
 from logic.auto_prompt_manager import AutoPromptManager
 
 EXAMPLE_LYRICS = """
@@ -258,7 +257,6 @@ def create_duration_slider_update(step_value, max_steps):
 
 
 # Initialize new systems
-audio_separator = AudioSeparator()
 auto_prompt_manager = AutoPromptManager(APP_DIR)
 
 # Global cancellation token and batch processor
@@ -921,7 +919,7 @@ def validate_audio_file(audio_path, use_separation=False):
         return None, f"Error processing file: {str(e)}"
 
 def process_reference_audio(audio_path, auto_prompt_enabled, auto_prompt_type, gen_type):
-    """Process reference audio including auto prompt and separation
+    """Validate and normalize reference audio path for subprocess inference.
     
     Args:
         audio_path: Path to uploaded audio file
@@ -932,41 +930,14 @@ def process_reference_audio(audio_path, auto_prompt_enabled, auto_prompt_type, g
     Returns:
         Tuple of (pmt_wav, vocal_wav, bgm_wav, use_audio, status_message, processed_audio_path)
     """
-    # Handle uploaded reference audio first (manual reference takes priority)
+    # Reference audio processing is handled in model subprocess stages.
+    # Keep this function lightweight to avoid holding VRAM in the Gradio process.
     if audio_path:
         try:
-            validated_path, error_msg = validate_audio_file(audio_path, use_separation=True)
+            validated_path, error_msg = validate_audio_file(audio_path, use_separation=False)
             if error_msg:
                 return None, None, None, False, f"[WARN] Audio validation failed: {error_msg}", None
-            
-            # Use audio separator for processing
-            if audio_separator.is_available():
-                full_audio, vocal_audio, bgm_audio = audio_separator.separate_audio(validated_path)
-                if full_audio is not None:
-                    # Convert to appropriate format for model
-                    if full_audio.dim() == 2:
-                        full_audio = full_audio[None]
-                    if vocal_audio.dim() == 2:
-                        vocal_audio = vocal_audio[None]  
-                    if bgm_audio.dim() == 2:
-                        bgm_audio = bgm_audio[None]
-                    
-                    return full_audio, vocal_audio, bgm_audio, True, "OK Reference audio processed with separation", validated_path
-                else:
-                    return None, None, None, False, "[WARN] Audio separation failed", None
-            else:
-                # Fallback: use original audio without separation
-                import torchaudio
-                audio, sr = torchaudio.load(validated_path)
-                if sr != 48000:
-                    audio = torchaudio.functional.resample(audio, sr, 48000)
-                if audio.shape[-1] > 48000 * 10:  # Limit to 10 seconds
-                    audio = audio[..., :48000 * 10]
-                if audio.dim() == 2:
-                    audio = audio[None]
-                
-                return audio, audio, audio, True, "OK Reference audio loaded (no separation available)", validated_path
-                
+            return None, None, None, True, "OK Reference audio validated (subprocess pipeline will process it)", validated_path
         except Exception as e:
             return None, None, None, False, f"[WARN] Reference audio error: {str(e)}", None
     
