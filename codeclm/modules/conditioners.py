@@ -126,11 +126,15 @@ class QwTokenizerConditioner(TextConditioner):
     def __init__(self, output_dim: int, 
                  token_path = "",
                  max_len = 300, 
-                 add_token_list=[]): #""
+                 add_token_list=None,
+                 version: str = 'v1'): #""
         from transformers import Qwen2Tokenizer
+        special_tokens = list(add_token_list or [])
+        if version != 'v1' and '.' not in special_tokens:
+            special_tokens.append('.')
         self.text_tokenizer = Qwen2Tokenizer.from_pretrained(token_path)
-        if add_token_list != []:
-            self.text_tokenizer.add_tokens(add_token_list, special_tokens=True)        
+        if special_tokens:
+            self.text_tokenizer.add_tokens(special_tokens, special_tokens=True)
         voc_size = len(self.text_tokenizer.get_vocab())
         # here initialize a output_proj (nn.Embedding) layer
         super().__init__(voc_size, output_dim, input_token=True, padding_idx=151643) 
@@ -151,7 +155,7 @@ class QwTokenizerConditioner(TextConditioner):
 
         vocab = self.text_tokenizer.get_vocab()
         # struct是全部的结构
-        struct_tokens = [i for i in add_token_list if i[0]=='[' and i[-1]==']']
+        struct_tokens = [i for i in special_tokens if i[0]=='[' and i[-1]==']']
         self.struct_token_ids = [vocab[i] for i in struct_tokens]
         self.pad_token_idx = 151643
         
@@ -216,10 +220,17 @@ class QwTokenizerConditioner(TextConditioner):
 class QwTextConditioner(TextConditioner):
     def __init__(self, output_dim: int,
                  token_path = "", 
-                 max_len = 300): #""
+                 max_len = 300,
+                 version: str = 'v1'): #""
         
         from transformers import Qwen2Tokenizer
-        self.text_tokenizer = Qwen2Tokenizer.from_pretrained(token_path)    
+        self.text_tokenizer = Qwen2Tokenizer.from_pretrained(token_path)
+        if version != 'v1':
+            self.text_tokenizer.add_tokens(
+                ['[Musicality-very-high]', '[Musicality-high]', '[Musicality-medium]',
+                 '[Musicality-low]', '[Musicality-very-low]', '[Pure-Music]', '.'],
+                special_tokens=True
+            )
         voc_size = len(self.text_tokenizer.get_vocab())         
         # here initialize a output_proj (nn.Embedding) layer
         super().__init__(voc_size, output_dim, input_token=True, padding_idx=151643) 
@@ -683,7 +694,13 @@ class ClassifierFreeGuidanceDropoutInference(ClassifierFreeGuidanceDropout):
             sample.audio[condition] = self.get_null_wav(audio_cond.wav, sr=audio_cond.sample_rate[0])
         else:
             if customized is None:
-                sample.text[condition] = None
+                if condition in ['type_info'] and sample.text[condition] is not None:
+                    if "[Musicality-very-high]" in sample.text[condition]:
+                        sample.text[condition] = "[Musicality-very-low], ."
+                    else:
+                        sample.text[condition] = None
+                else:
+                    sample.text[condition] = None
             else:
                 text_cond = deepcopy(sample.text[condition])
                 if "structure" in customized:

@@ -3,6 +3,7 @@ All the functions to build the relevant models and modules
 from the Hydra config.
 """
 
+import os
 import typing as tp
 
 import omegaconf
@@ -20,6 +21,40 @@ from codeclm.modules.conditioners import (
     ConditionerProvider,
     ConditionFuser,
 )
+
+
+def _resolve_token_path(token_path: str) -> str:
+    """Resolve tokenizer path against known local roots while preserving HF repo ids."""
+    if not token_path:
+        return token_path
+
+    raw_path = os.path.expandvars(os.path.expanduser(str(token_path)))
+    if os.path.isabs(raw_path):
+        return os.path.normpath(raw_path)
+
+    package_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
+    parent_root = os.path.abspath(os.path.join(package_root, ".."))
+    candidates = [
+        os.path.abspath(raw_path),  # current working directory
+        os.path.join(package_root, raw_path),
+        os.path.join(package_root, "ckpt", raw_path),
+        os.path.join(package_root, "SongGeneration-Runtime", raw_path),
+        os.path.join(parent_root, raw_path),
+        os.path.join(parent_root, "ckpt", raw_path),
+        os.path.join(parent_root, "SongGeneration-Runtime", raw_path),
+    ]
+
+    seen = set()
+    for candidate in candidates:
+        normalized = os.path.normpath(candidate)
+        if normalized in seen:
+            continue
+        seen.add(normalized)
+        if os.path.isdir(normalized):
+            return normalized
+
+    # Keep original relative value so Hugging Face repo IDs continue to work.
+    return raw_path
 
 
 def get_audio_tokenizer_model(checkpoint_path: str, cfg: omegaconf.DictConfig):
@@ -52,7 +87,7 @@ def get_audio_tokenizer_model_cpu(checkpoint_path: str, cfg: omegaconf.DictConfi
         return AudioTokenizer.get_pretrained(name, cfg.vae_config, cfg.vae_model, 'cpu', mode=cfg.mode, tango_device='cpu')
 
 
-def get_lm_model(cfg: omegaconf.DictConfig): #-> LMModel:
+def get_lm_model(cfg: omegaconf.DictConfig, version: str = 'v1'): #-> LMModel:
     """Instantiate a LM."""    
     lm_kwargs = dict_from_config(getattr(cfg, 'lm'))
     
@@ -61,7 +96,7 @@ def get_lm_model(cfg: omegaconf.DictConfig): #-> LMModel:
     q_modeling = lm_kwargs.pop('q_modeling', None)    
         
     # conditioner
-    condition_provider = get_conditioner_provider(lm_kwargs["dim"], cfg)
+    condition_provider = get_conditioner_provider(lm_kwargs["dim"], cfg, version=version)
     
     # codebook pattern: delay
     codebooks_pattern_cfg = getattr(cfg, 'codebooks_pattern')
@@ -97,9 +132,8 @@ def get_lm_model(cfg: omegaconf.DictConfig): #-> LMModel:
         raise KeyError(f"Unexpected LM model {lm_type}")
 
 
-def get_conditioner_provider(output_dim: int, cfg: omegaconf.DictConfig) -> ConditionerProvider:
+def get_conditioner_provider(output_dim: int, cfg: omegaconf.DictConfig, version: str = 'v1') -> ConditionerProvider:
     """Instantiate a conditioning model."""    
-    import os
     cfg = getattr(cfg, 'conditioners')
     dict_cfg = {} if cfg is None else dict_from_config(cfg)
     conditioners: tp.Dict[str, BaseConditioner] = {}
@@ -108,23 +142,21 @@ def get_conditioner_provider(output_dim: int, cfg: omegaconf.DictConfig) -> Cond
     for cond, cond_cfg in dict_cfg.items():
         model_type = cond_cfg['model']
         model_args = cond_cfg[model_type]
-        # Resolve token_path to absolute path if it exists
+        # Resolve token_path to an existing local directory when possible.
         if 'token_path' in model_args:
-            token_path = model_args['token_path']
-            if not os.path.isabs(token_path):
-                # Convert relative path to absolute path
-                token_path = os.path.abspath(token_path)
-                model_args = dict(model_args)  # Make a copy to avoid modifying the original
-                model_args['token_path'] = token_path
+            model_args = dict(model_args)
+            model_args['token_path'] = _resolve_token_path(model_args['token_path'])
         
         if model_type == 'QwTokenizer':
             conditioners[str(cond)] = QwTokenizerConditioner(
                 output_dim=output_dim,
+                version=version,
                 **model_args
             )
         elif model_type == "QwTextTokenizer":
             conditioners[str(cond)] = QwTextConditioner(
                 output_dim=output_dim,
+                version=version,
                 **model_args
             )
         elif model_type == "qt_embedding":

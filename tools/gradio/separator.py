@@ -2,6 +2,7 @@ import torchaudio
 import os
 import torch
 import sys
+import librosa
 from pathlib import Path
 
 # Add ckpt directory to Python path so we can import third_party modules
@@ -10,6 +11,12 @@ if str(ckpt_dir) not in sys.path:
     sys.path.insert(0, str(ckpt_dir))
 
 from third_party.demucs.models.pretrained import get_model_from_yaml
+
+
+def load_audio_by_librosa(path):
+    audio, sample_rate = librosa.load(path, sr=48000)
+    tensor = torch.tensor(audio).unsqueeze(0)
+    return tensor, sample_rate
 
 
 class Separator(torch.nn.Module):
@@ -28,7 +35,10 @@ class Separator(torch.nn.Module):
         return model
     
     def load_audio(self, f):
-        a, fs = torchaudio.load(f)
+        try:
+            a, fs = torchaudio.load(f)
+        except Exception:
+            a, fs = load_audio_by_librosa(f)
         if (fs != 48000):
             a = torchaudio.functional.resample(a, fs, 48000)
         if a.shape[-1] >= 48000*10:

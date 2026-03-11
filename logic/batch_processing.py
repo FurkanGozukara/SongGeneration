@@ -209,7 +209,14 @@ class BatchProcessor:
         
         # Add auto_prompt_path if not present
         if 'auto_prompt_path' not in params:
-            params['auto_prompt_path'] = os.path.join(self.app_dir, "ckpt/prompt.pt")
+            v2_prompt_path = os.path.join(self.app_dir, "tools", "new_auto_prompt.pt")
+            legacy_prompt_path = os.path.join(self.app_dir, "tools", "new_prompt.pt")
+            if os.path.exists(v2_prompt_path):
+                params['auto_prompt_path'] = v2_prompt_path
+            elif os.path.exists(legacy_prompt_path):
+                params['auto_prompt_path'] = legacy_prompt_path
+            else:
+                params['auto_prompt_path'] = os.path.join(self.app_dir, "ckpt", "prompt.pt")
         
         # Generate the song
         generation_result = generate_single_song(

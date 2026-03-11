@@ -6,6 +6,7 @@ from pathlib import Path
 
 import time
 import json
+import re
 import torch
 import torchaudio
 import numpy as np
@@ -25,7 +26,83 @@ if str(ckpt_dir) not in sys.path:
 from third_party.demucs.models.pretrained import get_model_from_yaml
 
 
-auto_prompt_type = ['Pop', 'R&B', 'Dance', 'Jazz', 'Folk', 'Rock', 'Chinese Style', 'Chinese Tradition', 'Metal', 'Reggae', 'Chinese Opera', 'Auto']
+auto_prompt_type = ['Auto', 'Pop', 'Latin', 'Rock', 'Electronic', 'Metal', 'Country', 'R&B/Soul', 'Ballad', 'Jazz', 'World', 'Hip-Hop', 'Funk', 'Soundtrack']
+
+AUTO_PROMPT_CANDIDATES = (
+    'tools/new_auto_prompt.pt',
+    'tools/new_prompt.pt',
+    'ckpt/prompt.pt',
+)
+
+
+def check_language_by_text(text):
+    if not text:
+        return "en"
+    chinese_count = len(re.findall(r'[\u4e00-\u9fff]', text))
+    english_count = len(re.findall(r'[a-zA-Z]', text))
+    total = chinese_count + english_count
+    if total == 0:
+        return "en"
+    if chinese_count / total >= 0.2:
+        return "zh"
+    if english_count / total >= 0.5:
+        return "en"
+    return "en"
+
+
+def detect_model_version(ckpt_path: str) -> str:
+    model_name = os.path.basename(os.path.normpath(ckpt_path)).lower().replace('-', '_')
+    if model_name == "songgeneration_v2_large":
+        return "v2"
+    return "v1"
+
+
+def load_auto_prompt_data():
+    for candidate in AUTO_PROMPT_CANDIDATES:
+        if os.path.exists(candidate):
+            return load_torch_file(candidate, map_location='cpu')
+    raise FileNotFoundError(
+        f"Could not find an auto prompt asset in: {', '.join(AUTO_PROMPT_CANDIDATES)}"
+    )
+
+
+def _choose_prompt_token(prompt_group, language: str):
+    if isinstance(prompt_group, dict):
+        preferred = prompt_group.get(language)
+        if isinstance(preferred, list) and preferred:
+            return preferred[np.random.randint(0, len(preferred))]
+        for prompts in prompt_group.values():
+            if isinstance(prompts, list) and prompts:
+                return prompts[np.random.randint(0, len(prompts))]
+        return None
+    if isinstance(prompt_group, list) and prompt_group:
+        return prompt_group[np.random.randint(0, len(prompt_group))]
+    return prompt_group
+
+
+def select_auto_prompt_token(auto_prompt, prompt_type_name: str, lyric: str):
+    if not isinstance(auto_prompt, dict):
+        return None
+    language = check_language_by_text(lyric)
+    if prompt_type_name == "Auto":
+        auto_group = auto_prompt.get("Auto")
+        prompt_token = _choose_prompt_token(auto_group, language)
+        if prompt_token is not None:
+            return prompt_token
+        merged_prompts = []
+        for value in auto_prompt.values():
+            if isinstance(value, dict):
+                for prompts in value.values():
+                    if isinstance(prompts, list):
+                        merged_prompts.extend(prompts)
+            elif isinstance(value, list):
+                merged_prompts.extend(value)
+            elif value is not None:
+                merged_prompts.append(value)
+        if merged_prompts:
+            return merged_prompts[np.random.randint(0, len(merged_prompts))]
+        return None
+    return _choose_prompt_token(auto_prompt.get(prompt_type_name), language)
 
 class Separator:
     def __init__(self, dm_model_path='ckpt/third_party/demucs/ckpt/htdemucs.pth', dm_config_path='ckpt/third_party/demucs/ckpt/htdemucs.yaml', gpu_id=0) -> None:
@@ -91,7 +168,7 @@ def parse_args():
                       help='Suppress verbose output during generation (default: False)')
     return parser.parse_args()
 
-def generate(args):
+def generate(args, version='v1'):
     from codeclm.utils.offload_profiler import OffloadProfiler, OffloadParamParse
     
     ckpt_path = args.ckpt_path
@@ -109,10 +186,9 @@ def generate(args):
 
     with suppress_output():
         separator = Separator()
-        auto_prompt = load_torch_file('ckpt/prompt.pt', map_location='cpu')
+        auto_prompt = load_auto_prompt_data()
         audio_tokenizer = builders.get_audio_tokenizer_model(cfg.audio_tokenizer_checkpoint, cfg)
         audio_tokenizer = audio_tokenizer.eval().cuda()
-    merge_prompt = [item for sublist in auto_prompt.values() for item in sublist]
     with open(input_jsonl, "r") as fp:
         lines = fp.readlines()
 
@@ -159,10 +235,9 @@ def generate(args):
             melody_is_wav = False
         elif "auto_prompt_audio_type" in item:
             assert item["auto_prompt_audio_type"] in auto_prompt_type, f"auto_prompt_audio_type {item['auto_prompt_audio_type']} not found"
-            if item["auto_prompt_audio_type"] == "Auto": 
-                prompt_token = merge_prompt[np.random.randint(0, len(merge_prompt))]
-            else:
-                prompt_token = auto_prompt[item["auto_prompt_audio_type"]][np.random.randint(0, len(auto_prompt[item["auto_prompt_audio_type"]]))]
+            prompt_token = select_auto_prompt_token(auto_prompt, item["auto_prompt_audio_type"], item.get('gt_lyric', ''))
+            if prompt_token is None:
+                raise ValueError(f"auto prompt token could not be selected for {item['auto_prompt_audio_type']}")
             pmt_wav = prompt_token[:,[0],:]
             vocal_wav = prompt_token[:,[1],:]
             bgm_wav = prompt_token[:,[2],:]
@@ -201,7 +276,7 @@ def generate(args):
             item['bgm_wav'] = bgm_wav
 
     torch.cuda.empty_cache()
-    audiolm = builders.get_lm_model(cfg)
+    audiolm = builders.get_lm_model(cfg, version=version)
     checkpoint = torch.load(ckpt_path, map_location='cpu')
     audiolm_state_dict = {k.replace('audiolm.', ''): v for k, v in checkpoint.items() if k.startswith('audiolm')}
     audiolm.load_state_dict(audiolm_state_dict, strict=False)
@@ -230,7 +305,15 @@ def generate(args):
 
     for item in new_items:
         lyric = item["gt_lyric"]
-        descriptions = item["descriptions"] if "descriptions" in item else None
+        if version == 'v1':
+            descriptions = item["descriptions"] if "descriptions" in item else None
+        else:
+            base_description = item["descriptions"].lower() if "descriptions" in item else "."
+            if gen_type == 'bgm':
+                descriptions = f"[Musicality-very-high], [Pure-Music], {base_description}"
+                lyric = "."
+            else:
+                descriptions = f"[Musicality-very-high], {base_description}"
         pmt_wav = item['pmt_wav']
         vocal_wav = item['vocal_wav']
         bgm_wav = item['bgm_wav']
@@ -239,7 +322,7 @@ def generate(args):
 
 
         generate_inp = {
-            'lyrics': [lyric.replace("  ", " ")],
+            'lyrics': [lyric.replace("  ", " ")] if gen_type != 'bgm' else '.',
             'descriptions': [descriptions],
             'melody_wavs': pmt_wav,
             'vocal_wavs': vocal_wav,
@@ -293,7 +376,7 @@ def generate(args):
         for item in new_items:
             fw.writelines(json.dumps(item, ensure_ascii=False)+"\n")
 
-def generate_lowmem(args):
+def generate_lowmem(args, version='v1'):
     ckpt_path = args.ckpt_path
     input_jsonl = args.input_jsonl
     save_dir = args.save_dir
@@ -320,8 +403,7 @@ def generate_lowmem(args):
             audio_tokenizer = builders.get_audio_tokenizer_model(cfg.audio_tokenizer_checkpoint, cfg)
             audio_tokenizer = audio_tokenizer.eval().cuda()
     with suppress_output():
-        auto_prompt = load_torch_file('ckpt/prompt.pt', map_location='cpu')
-    merge_prompt = [item for sublist in auto_prompt.values() for item in sublist]
+        auto_prompt = load_auto_prompt_data()
     new_items = []
     for line in lines:
         item = json.loads(line)
@@ -361,10 +443,9 @@ def generate_lowmem(args):
             melody_is_wav = False
         elif "auto_prompt_audio_type" in item:
             assert item["auto_prompt_audio_type"] in auto_prompt_type, f"auto_prompt_audio_type {item['auto_prompt_audio_type']} not found"
-            if item["auto_prompt_audio_type"] == "Auto": 
-                prompt_token = merge_prompt[np.random.randint(0, len(merge_prompt))]
-            else:
-                prompt_token = auto_prompt[item["auto_prompt_audio_type"]][np.random.randint(0, len(auto_prompt[item["auto_prompt_audio_type"]]))]
+            prompt_token = select_auto_prompt_token(auto_prompt, item["auto_prompt_audio_type"], item.get('gt_lyric', ''))
+            if prompt_token is None:
+                raise ValueError(f"auto prompt token could not be selected for {item['auto_prompt_audio_type']}")
             pmt_wav = prompt_token[:,[0],:]
             vocal_wav = prompt_token[:,[1],:]
             bgm_wav = prompt_token[:,[2],:]
@@ -410,7 +491,7 @@ def generate_lowmem(args):
 
     # Define model or load pretrained model
     with suppress_output():
-        audiolm = builders.get_lm_model(cfg)
+        audiolm = builders.get_lm_model(cfg, version=version)
         checkpoint = torch.load(ckpt_path, map_location='cpu')
         audiolm_state_dict = {k.replace('audiolm.', ''): v for k, v in checkpoint.items() if k.startswith('audiolm')}
         audiolm.load_state_dict(audiolm_state_dict, strict=False)
@@ -451,14 +532,22 @@ def generate_lowmem(args):
     
     for item in new_items:
         lyric = item["gt_lyric"]
-        descriptions = item["descriptions"] if "descriptions" in item else None
+        if version == 'v1':
+            descriptions = item["descriptions"] if "descriptions" in item else None
+        else:
+            base_description = item["descriptions"].lower() if "descriptions" in item else "."
+            if gen_type == 'bgm':
+                descriptions = f"[Musicality-very-high], [Pure-Music], {base_description}"
+                lyric = "."
+            else:
+                descriptions = f"[Musicality-very-high], {base_description}"
         pmt_wav = item['pmt_wav']
         vocal_wav = item['vocal_wav']
         bgm_wav = item['bgm_wav']
         melody_is_wav = item['melody_is_wav']
             
         generate_inp = {
-            'lyrics': [lyric.replace("  ", " ")],
+            'lyrics': [lyric.replace("  ", " ")] if gen_type != 'bgm' else '.',
             'descriptions': [descriptions],
             'melody_wavs': pmt_wav,
             'vocal_wavs': vocal_wav,
@@ -579,26 +668,54 @@ if __name__ == "__main__":
         if not args.quiet:
             print(f"reserved memory: {res_mem}GB")
 
-        model_name = args.ckpt_path.split("/")[-1]
-        assert model_name in ['songgeneration_base'], f'{model_name} is not supported, currently only songgeneration_base is supported'
-        if model_name == 'songgeneration_base':
+        model_name = os.path.basename(os.path.normpath(args.ckpt_path)).lower().replace('-', '_')
+        model_version = detect_model_version(args.ckpt_path)
+        if model_name in ['songgeneration_base', 'songgeneration_base_new', 'songgeneration_base_full']:
             if res_mem > 24 and not args.low_mem:
                 if not args.quiet:
                     print("use generate")
                 if args.quiet:
                     with suppress_output():
-                        generate(args)
+                        generate(args, version=model_version)
                 else:
-                    generate(args)
+                    generate(args, version=model_version)
             else:
                 from codeclm.utils.offload_profiler import OffloadProfiler, OffloadParamParse
                 if not args.quiet:
                     print("use generate_lowmem")
                 if args.quiet:
                     with suppress_output():
-                        generate_lowmem(args)
+                        generate_lowmem(args, version=model_version)
                 else:
-                    generate_lowmem(args)
+                    generate_lowmem(args, version=model_version)
+        elif model_name in ['songgeneration_large', 'songgeneration_v2_large']:
+            memory_threshold = 32 if model_version == 'v2' else 36
+            if res_mem > memory_threshold and not args.low_mem:
+                if not args.quiet:
+                    print("use generate")
+                if args.quiet:
+                    with suppress_output():
+                        generate(args, version=model_version)
+                else:
+                    generate(args, version=model_version)
+            else:
+                from codeclm.utils.offload_profiler import OffloadProfiler, OffloadParamParse
+                if not args.quiet:
+                    print("use generate_lowmem")
+                if args.quiet:
+                    with suppress_output():
+                        generate_lowmem(args, version=model_version)
+                else:
+                    generate_lowmem(args, version=model_version)
+        else:
+            from codeclm.utils.offload_profiler import OffloadProfiler, OffloadParamParse
+            if not args.quiet:
+                print("use generate_lowmem")
+            if args.quiet:
+                with suppress_output():
+                    generate_lowmem(args, version=model_version)
+            else:
+                generate_lowmem(args, version=model_version)
 
     else:
         print("CUDA is not available")

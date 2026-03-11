@@ -74,7 +74,12 @@ class AudioSeparator:
             Preprocessed audio tensor
         """
         try:
-            audio, sample_rate = torchaudio.load(audio_path)
+            try:
+                audio, sample_rate = torchaudio.load(audio_path)
+            except Exception:
+                import librosa
+                loaded_audio, sample_rate = librosa.load(audio_path, sr=48000)
+                audio = torch.tensor(loaded_audio).unsqueeze(0)
             
             # Resample to 48kHz if needed
             if sample_rate != 48000:

@@ -73,13 +73,12 @@ How should I continue forward
 
 # Generation types and auto prompt types from original repo
 GENERATION_TYPES = ['mixed', 'vocal', 'bgm', 'separate']
-AUTO_PROMPT_TYPES = ['Pop', 'R&B', 'Dance', 'Jazz', 'Folk', 'Rock', 'Chinese Style', 'Chinese Tradition', 'Metal', 'Reggae', 'Chinese Opera', 'Auto']
+AUTO_PROMPT_TYPES = ['Auto', 'Pop', 'Latin', 'Rock', 'Electronic', 'Metal', 'Country', 'R&B/Soul', 'Ballad', 'Jazz', 'World', 'Hip-Hop', 'Funk', 'Soundtrack']
 
 # Extended generation length support based on model version
 # Only two officially supported models
 MAX_GENERATION_LENGTHS = {
-    'songgeneration_large': 6750,  # ~4m30s - BEST QUALITY (default)
-    'songgeneration_base_full': 6750,  # ~4m30s - GOOD QUALITY
+    'songgeneration_v2_large': 6750,  # ~4m30s - BEST QUALITY
 }
 
 DEFAULT_MAX_GENERATION_STEPS = max(MAX_GENERATION_LENGTHS.values())
@@ -103,11 +102,11 @@ args = parser.parse_args()
 def detect_model_version(ckpt_path):
     """Detect and validate model version from checkpoint path"""
     model_name = op.basename(ckpt_path).lower().replace('-', '_')
-    supported_models = ['songgeneration_large', 'songgeneration_base_full']
+    supported_models = ['songgeneration_v2_large']
     
     if model_name not in supported_models:
         print(f"Warning: Unknown model version '{model_name}'. Supported: {supported_models}")
-        return 'songgeneration_large'  # fallback to Large model (default)
+        return 'songgeneration_v2_large'  # fallback to v2 Large model
     
     return model_name
 
@@ -129,10 +128,8 @@ def detect_gpu_memory():
     print(f"Available GPU memory: {available_memory:.1f}GB")
     
     # Determine if low memory mode should be used based on model version
-    # Only two officially supported models
     memory_requirements = {
-        'songgeneration_large': {'normal': 28, 'with_audio': 28},  # 22-28GB, BEST QUALITY
-        'songgeneration_base_full': {'normal': 18, 'with_audio': 18}  # 12-18GB, GOOD QUALITY
+        'songgeneration_v2_large': {'normal': 28, 'with_audio': 28},
     }
     
     # Use default requirements if MODEL_VERSION is None or not found (default to Large model)
@@ -140,9 +137,9 @@ def detect_gpu_memory():
     use_low_mem = available_memory < required['normal']
     
     if use_low_mem:
-        print(f"Auto-enabling low memory mode (required: {required['normal']}GB, available: {available_memory:.1f}GB)")
+        print("Auto-enabling low memory mode based on detected GPU memory.")
     else:
-        print(f"Using normal memory mode (available: {available_memory:.1f}GB >= required: {required['normal']}GB)")
+        print("Using normal memory mode based on detected GPU memory.")
     
     return available_memory, use_low_mem
 
@@ -231,7 +228,7 @@ def format_duration_slider_info(max_steps):
     if max_seconds < min_seconds:
         max_seconds = min_seconds
     return (
-        "Controls generation duration in seconds (≈25 steps per second). "
+        "Controls generation duration in seconds (~25 steps per second). "
         f"Model range: {min_seconds}-{max_seconds}s. "
         f"Values below {min_seconds}s snap to the minimum automatically."
     )
@@ -274,12 +271,9 @@ def get_available_models():
     ckpt_dir = op.join(APP_DIR, 'ckpt')
     available_models = []
     
-    # Check for supported model versions
-    # Order matters: Large model first (default), then Base Full
-    # Only these two models are officially supported
+    # Only the SongGeneration 2 / LeVo 2 checkpoint is officially supported.
     model_dirs = [
-        ('songgeneration_large', 'SongGeneration Large - BEST QUALITY (4m30s, 22-28GB VRAM)'),
-        ('songgeneration_base_full', 'SongGeneration Base Full - GOOD QUALITY (4m30s, 12-18GB VRAM)')
+        ('songgeneration_v2_large', 'SongGeneration v2 Large - BEST QUALITY (songgeneration_v2_large 10 March 2026)')
     ]
     
     for model_dir, description in model_dirs:
@@ -302,7 +296,7 @@ def load_model(model_path, progress_callback=None):
     # Clean up existing model
     if MODEL is not None:
         try:
-            print("🧹 Cleaning up previous model...")
+            print("[CLEAN] Cleaning up previous model...")
             del MODEL
             MODEL = None
             
@@ -313,17 +307,17 @@ def load_model(model_path, progress_callback=None):
             
             import gc
             gc.collect()
-            print("✅ Previous model cleaned up")
+            print("[OK] Previous model cleaned up")
             
         except Exception as e:
-            print(f"⚠️ Warning during model cleanup: {e}")
+            print(f"[WARN] Warning during model cleanup: {e}")
     
     if progress_callback:
         progress_callback(0.3, f"Loading new model from {model_path}...")
     
     # Load new model
     try:
-        print(f"🔄 Loading model: {op.basename(model_path)}")
+        print(f"[LOAD] Loading model: {op.basename(model_path)}")
         
         with suppress_output():
             MODEL = LeVoInference(model_path)
@@ -337,11 +331,11 @@ def load_model(model_path, progress_callback=None):
         if progress_callback:
             progress_callback(1.0, "Model loaded successfully!")
         
-        print(f"✅ Model loaded successfully: {MODEL_VERSION}")
-        return True, f"✅ Successfully loaded {MODEL_VERSION}"
+        print(f"[OK] Model loaded successfully: {MODEL_VERSION}")
+        return True, f"[OK] Successfully loaded {MODEL_VERSION}"
         
     except Exception as e:
-        error_msg = f"❌ Failed to load model: {str(e)}"
+        error_msg = f"[ERROR] Failed to load model: {str(e)}"
         print(error_msg)
         if progress_callback:
             progress_callback(1.0, error_msg)
@@ -354,23 +348,15 @@ def get_model_info(model_path):
     
     model_name = op.basename(model_path)
     
-    # Model specifications - Only two officially supported models
+    # Model specifications
     model_specs = {
-        'songgeneration_large': {
+        'songgeneration_v2_large': {
             'length': '4m30s (270 seconds)',
-            'languages': 'Chinese + English',
-            'vram': '22-28GB (RTX 4090, A100)', 
-            'quality': '★★★★★ BEST',
+            'languages': 'Multilingual (zh, en, es, ja, etc.)',
+            'vram': 'Varies by GPU and runtime settings',
+            'quality': 'BEST',
             'steps': '6750 steps max',
-            'notes': 'Default & Recommended'
-        },
-        'songgeneration_base_full': {
-            'length': '4m30s (270 seconds)',
-            'languages': 'Chinese + English', 
-            'vram': '12-18GB (RTX 3090, 4080)',
-            'quality': '★★★★ GOOD',
-            'steps': '6750 steps max',
-            'notes': 'For lower VRAM systems'
+            'notes': 'LeVo 2 / SongGeneration 2'
         }
     }
     
@@ -383,9 +369,9 @@ def get_model_info(model_path):
 **Max Length**: {specs.get('length', 'Unknown')}
 **Max Steps**: {specs.get('steps', 'Unknown')}
 **Languages**: {specs.get('languages', 'Unknown')}
-**VRAM Required**: {specs.get('vram', 'Unknown')}
+**VRAM**: {specs.get('vram', 'Unknown')}
 **Note**: {specs.get('notes', 'N/A')}
-**Status**: {'✅ **LOADED**' if CURRENT_MODEL_PATH == model_path else '⏳ Not loaded'}
+**Status**: {'[OK] **LOADED**' if CURRENT_MODEL_PATH == model_path else 'Not loaded'}
 """
     
     return info
@@ -467,6 +453,52 @@ def add_none_option(options):
     """Return a new list with 'None' prepended for optional selections."""
     cleaned = [opt for opt in options if opt.lower() != "none"]
     return ["None"] + cleaned
+
+
+def normalize_dropdown_value(value, choices, default="None"):
+    """Map legacy/custom preset values to the closest valid dropdown choice."""
+    if not choices:
+        return value
+
+    fallback = default if default in choices else choices[0]
+    if value in choices:
+        return value
+    if value is None:
+        return fallback
+
+    text = str(value).strip()
+    if not text:
+        return fallback
+
+    choice_lookup = {str(choice).strip().lower(): choice for choice in choices}
+    lower_text = text.lower()
+    if lower_text in choice_lookup:
+        return choice_lookup[lower_text]
+
+    tokenized = re.sub(r"\s+(?:and|&)\s+", ",", lower_text)
+    for token in re.split(r"\s*[,;+|]\s*", tokenized):
+        if token and token in choice_lookup:
+            return choice_lookup[token]
+
+    substring_matches = [
+        original_choice
+        for choice_key, original_choice in choice_lookup.items()
+        if choice_key != "none" and choice_key and choice_key in lower_text
+    ]
+    if substring_matches:
+        return max(substring_matches, key=len)
+
+    return fallback
+
+
+def sanitize_preset_dropdown_values(values):
+    """Ensure preset values always match dropdown choices."""
+    values["genre"] = normalize_dropdown_value(values.get("genre"), GENRES)
+    values["instrument"] = normalize_dropdown_value(values.get("instrument"), INSTRUMENTS)
+    values["emotion"] = normalize_dropdown_value(values.get("emotion"), EMOTIONS)
+    values["timbre"] = normalize_dropdown_value(values.get("timbre"), TIMBRES)
+    values["gender"] = normalize_dropdown_value(values.get("gender"), GENDERS)
+    return values
 
 
 def format_attribute_for_prompt(attribute_type: str, value) -> str:
@@ -709,14 +741,14 @@ def run_batch_processing(
     """Run batch processing with progress tracking"""
     # Check if model is loaded
     if MODEL is None:
-        error_msg = "❌ No model loaded! Please select and load a model first."
-        print(f"❌ ERROR: {error_msg}")
+        error_msg = "[ERROR] No model loaded! Please select and load a model first."
+        print(f"[ERROR] {error_msg}")
         gr.Error(error_msg)
         return error_msg
     
     if not input_folder or not output_folder:
         error_msg = "Please specify both input and output folders"
-        print(f"❌ ERROR: {error_msg}")
+        print(f"[ERROR] {error_msg}")
         gr.Error(error_msg)
         return error_msg
     
@@ -789,13 +821,13 @@ def run_batch_processing(
         status_msg += f"- Failed: {results['failed']} files\\n"
         
         if results['cancelled']:
-            status_msg += "\\n⚠️ Processing was cancelled"
+            status_msg += "\\n[WARN] Processing was cancelled"
         
         yield gr.update(visible=False), gr.update(visible=False), status_msg
         
     except Exception as e:
         error_msg = f"Batch processing error: {str(e)}"
-        print(f"❌ ERROR: {error_msg}")
+        print(f"[ERROR] {error_msg}")
         gr.Error(error_msg)
         yield gr.update(visible=False), gr.update(visible=False), error_msg
 
@@ -905,7 +937,7 @@ def process_reference_audio(audio_path, auto_prompt_enabled, auto_prompt_type, g
         try:
             validated_path, error_msg = validate_audio_file(audio_path, use_separation=True)
             if error_msg:
-                return None, None, None, False, f"⚠️ Audio validation failed: {error_msg}", None
+                return None, None, None, False, f"[WARN] Audio validation failed: {error_msg}", None
             
             # Use audio separator for processing
             if audio_separator.is_available():
@@ -919,9 +951,9 @@ def process_reference_audio(audio_path, auto_prompt_enabled, auto_prompt_type, g
                     if bgm_audio.dim() == 2:
                         bgm_audio = bgm_audio[None]
                     
-                    return full_audio, vocal_audio, bgm_audio, True, "✓ Reference audio processed with separation", validated_path
+                    return full_audio, vocal_audio, bgm_audio, True, "OK Reference audio processed with separation", validated_path
                 else:
-                    return None, None, None, False, "⚠️ Audio separation failed", None
+                    return None, None, None, False, "[WARN] Audio separation failed", None
             else:
                 # Fallback: use original audio without separation
                 import torchaudio
@@ -933,10 +965,10 @@ def process_reference_audio(audio_path, auto_prompt_enabled, auto_prompt_type, g
                 if audio.dim() == 2:
                     audio = audio[None]
                 
-                return audio, audio, audio, True, "✓ Reference audio loaded (no separation available)", validated_path
+                return audio, audio, audio, True, "OK Reference audio loaded (no separation available)", validated_path
                 
         except Exception as e:
-            return None, None, None, False, f"⚠️ Reference audio error: {str(e)}", None
+            return None, None, None, False, f"[WARN] Reference audio error: {str(e)}", None
     
     # Auto prompt checkpoint loading is disabled. Use manual reference audio/video instead.
     if auto_prompt_enabled:
@@ -958,7 +990,7 @@ def submit_lyrics(
 ):
     # Check if model is loaded
     if MODEL is None:
-        error_msg = "❌ **ERROR: No model loaded!**\n\nPlease select a model from the dropdown and click '🔄 Load Selected Model' before generating."
+        error_msg = "[ERROR] No model loaded!\n\nPlease select a model from the dropdown and click '[LOAD] Load Selected Model' before generating."
         print(error_msg)
         yield None, None, history, process_history(history), gr.update(visible=False), gr.update(value=error_msg, visible=True)
         return
@@ -976,12 +1008,12 @@ def submit_lyrics(
     is_valid, validation_message, normalized_lyrics = validate_lyrics_structure(lyrics)
     if not is_valid:
         error_msg = f"Lyrics validation failed: {validation_message}"
-        print(f"❌ ERROR: {error_msg}")
+        print(f"[ERROR] {error_msg}")
         gr.Error(error_msg)
         yield None, None, history, process_history(history), gr.update(visible=False), gr.update(visible=False)
         return
     
-    output_messages(f"✓ Lyrics structure validation passed")
+    output_messages(f"OK Lyrics structure validation passed")
     lyrics = normalized_lyrics
     
     # Limit lyrics length to prevent exceeding token limit
@@ -1065,7 +1097,7 @@ def submit_lyrics(
     output_messages(f"Requested steps: {max_gen_length}, Actual generation: {actual_steps} steps (~{duration_from_steps:.1f}s, {int(duration_from_steps/60)}m{int(duration_from_steps%60)}s)")
     
     if force_extra_prompt and not (extra_prompt and extra_prompt.strip()):
-        output_messages("⚠️ Warning: 'Use only extra prompt' is enabled but no extra description was provided!")
+        output_messages("[WARN] Warning: 'Use only extra prompt' is enabled but no extra description was provided!")
         output_messages("Using fallback placeholder for description...")
 
     description_for_model = compose_generation_description(
@@ -1166,7 +1198,7 @@ def submit_lyrics(
             
         except Exception as e:
             error_msg = f"Generation failed: {str(e)}"
-            print(f"❌ ERROR: {error_msg}")
+            print(f"[ERROR] {error_msg}")
             import traceback
             traceback.print_exc()
             gr.Error(error_msg)
@@ -1230,12 +1262,12 @@ def submit_lyrics(
                 # This ensures consistency across all preset generations
                 
                 # Override current parameters with preset values (EXCLUDING lyrics)
-                genre = preset_data.get('genre', genre)
-                instrument = preset_data.get('instrument', instrument)
+                genre = normalize_dropdown_value(preset_data.get('genre', genre), GENRES)
+                instrument = normalize_dropdown_value(preset_data.get('instrument', instrument), INSTRUMENTS)
                 bpm = preset_data.get('bpm', bpm)
-                emotion = preset_data.get('emotion', emotion)
-                timbre = preset_data.get('timbre', timbre)
-                gender = preset_data.get('gender', gender)
+                emotion = normalize_dropdown_value(preset_data.get('emotion', emotion), EMOTIONS)
+                timbre = normalize_dropdown_value(preset_data.get('timbre', timbre), TIMBRES)
+                gender = normalize_dropdown_value(preset_data.get('gender', gender), GENDERS)
                 extra_prompt = preset_data.get('extra_prompt', extra_prompt)
                 force_extra_prompt = preset_data.get('force_extra_prompt', force_extra_prompt)
                 # Update current_* variables used for generation
@@ -1370,11 +1402,11 @@ def submit_lyrics(
                     
                 except Exception as e:
                     error_msg = f"Generation {gen_idx + 1} failed: {str(e)}"
-                    print(f"❌ ERROR: {error_msg}")
+                    print(f"[ERROR] {error_msg}")
                     import traceback
                     traceback.print_exc()
                     gr.Error(error_msg)
-                    output_messages(f"❌ {error_msg}")
+                    output_messages(f"[ERROR] {error_msg}")
                     continue
             
             # Generate separate tracks if requested (runs regardless of should_generate)
@@ -1422,7 +1454,7 @@ def submit_lyrics(
                             bgm_audio_data = bgm_audio_data.cpu().permute(1, 0).float().numpy()
                             
                 except Exception as e:
-                    output_messages(f"⚠️ Separate track generation failed: {str(e)}")
+                    output_messages(f"[WARN] Separate track generation failed: {str(e)}")
                     vocal_audio_data = None
                     bgm_audio_data = None
             
@@ -1451,17 +1483,17 @@ def submit_lyrics(
                 try:
                     print(f"Debug: audio_data shape: {audio_data.shape}, dtype: {audio_data.dtype}, sample_rate: {MODEL.cfg.sample_rate}")
                     wavfile.write(wav_path, MODEL.cfg.sample_rate, audio_data)
-                    output_messages(f"✓ Audio saved: {base_filename}.wav")
+                    output_messages(f"OK Audio saved: {base_filename}.wav")
                 except Exception as e:
                     print(f"Warning: Could not save WAV: {e}")
                     print(f"Debug: audio_data type: {type(audio_data)}, shape: {getattr(audio_data, 'shape', 'no shape')}")
-                    output_messages(f"⚠️ Failed to save WAV: {base_filename}.wav")
+                    output_messages(f"[WARN] Failed to save WAV: {base_filename}.wav")
                     continue  # Skip the rest of file saving for this generation
                 
                 # Save FLAC (original format)
                 try:
                     sf.write(flac_path, audio_data, MODEL.cfg.sample_rate, format="FLAC")
-                    output_messages(f"✓ FLAC saved: {base_filename}.flac")
+                    output_messages(f"OK FLAC saved: {base_filename}.flac")
                 except Exception as e:
                     print(f"Warning: Could not save FLAC: {e}")
                 
@@ -1473,12 +1505,12 @@ def submit_lyrics(
                     if vocal_audio_data is not None:
                         vocal_wav_path = op.join(output_dir, f"{base_filename}_vocal.wav")
                         wavfile.write(vocal_wav_path, MODEL.cfg.sample_rate, vocal_audio_data)
-                        output_messages(f"✓ Vocal track saved: {base_filename}_vocal.wav")
+                        output_messages(f"OK Vocal track saved: {base_filename}_vocal.wav")
                     
                     if bgm_audio_data is not None:
                         bgm_wav_path = op.join(output_dir, f"{base_filename}_bgm.wav")
                         wavfile.write(bgm_wav_path, MODEL.cfg.sample_rate, bgm_audio_data)
-                        output_messages(f"✓ BGM track saved: {base_filename}_bgm.wav")
+                        output_messages(f"OK BGM track saved: {base_filename}_bgm.wav")
                 
                 # Convert to MP3 if requested
                 mp3_path = None
@@ -1489,10 +1521,10 @@ def submit_lyrics(
                     # Main track MP3
                     mp3_path = op.join(output_dir, f"{base_filename}.mp3")
                     if convert_wav_to_mp3(wav_path, mp3_path, '192k'):
-                        output_messages(f"✓ MP3 saved: {base_filename}.mp3")
+                        output_messages(f"OK MP3 saved: {base_filename}.mp3")
                     else:
                         mp3_path = None
-                        output_messages("✗ Failed to convert main track to MP3")
+                        output_messages("FAIL Failed to convert main track to MP3")
                 else:
                     mp3_path = None
                 
@@ -1504,32 +1536,32 @@ def submit_lyrics(
                     reference_copy_path = op.join(output_dir, f"{base_filename}_reference_audio{op.splitext(reference_source_path)[1]}")
                     try:
                         shutil.copy(reference_source_path, reference_copy_path)
-                        output_messages(f"✓ Reference audio copied: {op.basename(reference_copy_path)}")
+                        output_messages(f"OK Reference audio copied: {op.basename(reference_copy_path)}")
                     except Exception as ref_err:
                         reference_copy_path = None
-                        output_messages(f"⚠️ Unable to copy reference audio: {ref_err}")
+                        output_messages(f"[WARN] Unable to copy reference audio: {ref_err}")
                 elif processed_reference_path and os.path.exists(processed_reference_path):
                     reference_copy_path = op.join(output_dir, f"{base_filename}_reference_audio.wav")
                     try:
                         shutil.copy(processed_reference_path, reference_copy_path)
-                        output_messages(f"✓ Reference audio copied: {op.basename(reference_copy_path)}")
+                        output_messages(f"OK Reference audio copied: {op.basename(reference_copy_path)}")
                     except Exception as ref_err:
                         reference_copy_path = None
-                        output_messages(f"⚠️ Unable to copy processed reference audio: {ref_err}")
+                        output_messages(f"[WARN] Unable to copy processed reference audio: {ref_err}")
                     
                     # Separate tracks MP3
                     if gen_type == 'separate':
                         if vocal_wav_path:
                             vocal_mp3_path = op.join(output_dir, f"{base_filename}_vocal.mp3")
                             if convert_wav_to_mp3(vocal_wav_path, vocal_mp3_path, '192k'):
-                                output_messages(f"✓ Vocal MP3 saved: {base_filename}_vocal.mp3")
+                                output_messages(f"OK Vocal MP3 saved: {base_filename}_vocal.mp3")
                             else:
                                 vocal_mp3_path = None
                         
                         if bgm_wav_path:
                             bgm_mp3_path = op.join(output_dir, f"{base_filename}_bgm.mp3")
                             if convert_wav_to_mp3(bgm_wav_path, bgm_mp3_path, '192k'):
-                                output_messages(f"✓ BGM MP3 saved: {base_filename}_bgm.mp3")
+                                output_messages(f"OK BGM MP3 saved: {base_filename}_bgm.mp3")
                             else:
                                 bgm_mp3_path = None
                 
@@ -1538,10 +1570,10 @@ def submit_lyrics(
                 if image_path:
                     video_path = op.join(output_dir, f"{base_filename}.mp4")
                     if create_video_from_image_and_audio(image_path, wav_path, video_path):
-                        output_messages(f"✓ Video saved: {base_filename}.mp4")
+                        output_messages(f"OK Video saved: {base_filename}.mp4")
                     else:
                         video_path = None
-                        output_messages("✗ Failed to create video")
+                        output_messages("FAIL Failed to create video")
                 
                 # For the first generation, update the main outputs
                 if gen_idx == 0 and preset_idx == 0:
@@ -1573,9 +1605,9 @@ def submit_lyrics(
                 generated_files.append({'wav': wav_path, 'mp3': mp3_path, 'mp4': video_path})
                 
                 # Show completion status for this generation
-                output_messages(f"✓ Generation {generation_count}/{total_generations} complete")
+                output_messages(f"OK Generation {generation_count}/{total_generations} complete")
             else:
-                output_messages(f"⚠️ No audio data for generation {generation_count}/{total_generations}, skipping file save")
+                output_messages(f"[WARN] No audio data for generation {generation_count}/{total_generations}, skipping file save")
     
     # Update history
     history.append({"role": "user", "content": f"Generate {num_generations} song(s) with lyrics: {lyrics[:50]}..."})
@@ -1600,7 +1632,7 @@ def submit_lyrics(
 
 # Create Gradio interface
 with gr.Blocks(title="SECourses LeVo Song Generation App",theme=gr.themes.Soft()) as demo:
-    gr.Markdown("# SECourses Premium LeVo Song Generator V9.0 - Up to 4m30s Songs - https://www.patreon.com/posts/135592123")
+    gr.Markdown("# SECourses Premium LeVo Song Generator V10.0 - Up to 4m30s Songs - https://www.patreon.com/posts/135592123")
     
     history = gr.State([])
     session = gr.State({})
@@ -1613,16 +1645,16 @@ with gr.Blocks(title="SECourses LeVo Song Generation App",theme=gr.themes.Soft()
             model_paths = {f"{desc} ({model_dir})": path for model_dir, desc, path in available_models}
             
             model_dropdown = gr.Dropdown(
-                label="🎵 Select SongGeneration Model",
+                label="Select SongGeneration Model",
                 choices=model_choices,
                 value=model_choices[0] if model_choices else None,
-                info="Large (22-28GB VRAM, BEST) | Base Full (12-18GB VRAM, GOOD) - Both support 4m30s songs"
+                info="SongGeneration v2 Large (BEST) - supports up to 4m30s songs"
             )
         
         with gr.Column(scale=2):
             if not model_choices:
                 model_info_display = gr.Markdown("""
-                ❌ **No models found!**
+                [ERROR] **No models found!**
                 
                 Please download models first using:
                 ```bash
@@ -1633,16 +1665,16 @@ with gr.Blocks(title="SECourses LeVo Song Generation App",theme=gr.themes.Soft()
                 python Download_Song_Models.py --model model_base
                 ```
                 """)
-                load_model_btn = gr.Button("🔄 Refresh Model List", variant="secondary")
+                load_model_btn = gr.Button("[LOAD] Refresh Model List", variant="secondary")
             else:
                 model_info_display = gr.Markdown("Select a model to see details")
-                load_model_btn = gr.Button("🔄 Load Selected Model", variant="primary")
+                load_model_btn = gr.Button("[LOAD] Load Selected Model", variant="primary")
             
             model_status = gr.Markdown("**Status**: No model loaded", elem_id="model-status")
     
     # Add cancel button at the top
     with gr.Row():
-        cancel_btn = gr.Button("🛑 Cancel Generation", variant="stop", visible=False)
+        cancel_btn = gr.Button("Cancel Generation", variant="stop", visible=False)
     
     # Progress display with detailed status
     with gr.Row():
@@ -1650,7 +1682,7 @@ with gr.Blocks(title="SECourses LeVo Song Generation App",theme=gr.themes.Soft()
     
     # Main tabs at the top
     with gr.Tabs():
-        with gr.TabItem("🎵 Song Generation"):
+        with gr.TabItem("Song Generation"):
             with gr.Row():
                 with gr.Column(scale=2):
                     lyrics = gr.Textbox(
@@ -1667,8 +1699,8 @@ with gr.Blocks(title="SECourses LeVo Song Generation App",theme=gr.themes.Soft()
             
                     # Generate and Open Folder buttons at the top
                     with gr.Row():
-                        submit_btn = gr.Button("🎵 Generate Song", variant="primary")
-                        open_folder_btn = gr.Button("📁 Open Output Folder", variant="secondary")
+                        submit_btn = gr.Button("Generate Song", variant="primary")
+                        open_folder_btn = gr.Button("Open Output Folder", variant="secondary")
             
                     # Preset controls and duration
                     with gr.Row():
@@ -1681,8 +1713,8 @@ with gr.Blocks(title="SECourses LeVo Song Generation App",theme=gr.themes.Soft()
                                         value=None,
                                         interactive=True
                                     )
-                                    load_preset_btn = gr.Button("📂 Load Preset", variant="secondary")
-                                    refresh_preset_btn = gr.Button("🔄", variant="secondary", scale=0)
+                                    load_preset_btn = gr.Button("Load Preset", variant="secondary")
+                                    refresh_preset_btn = gr.Button("[LOAD]", variant="secondary", scale=0)
                                 
                                 with gr.Row():
                                     preset_name_input = gr.Textbox(
@@ -1690,7 +1722,7 @@ with gr.Blocks(title="SECourses LeVo Song Generation App",theme=gr.themes.Soft()
                                         placeholder="Enter preset name to save...",
                                         scale=3
                                     )
-                                    save_preset_btn = gr.Button("💾 Save Preset", variant="secondary", scale=1)
+                                    save_preset_btn = gr.Button("Save Preset", variant="secondary", scale=1)
                                 
                                 with gr.Row():
                                     loop_presets = gr.Checkbox(
@@ -1853,7 +1885,7 @@ with gr.Blocks(title="SECourses LeVo Song Generation App",theme=gr.themes.Soft()
                         )
                     
                     # Auto Prompt Audio Selection
-                    with gr.Accordion("🎵 Auto Prompt Audio Selection", open=True):
+                    with gr.Accordion("Auto Prompt Audio Selection", open=True):
                         with gr.Row():
                             auto_prompt_enabled = gr.Checkbox(
                                 label="Use Auto Prompt Audio",
@@ -1892,10 +1924,10 @@ with gr.Blocks(title="SECourses LeVo Song Generation App",theme=gr.themes.Soft()
                     output_video = gr.Video(label="Generated Video", visible=True)
                     
                     gr.Markdown("---")
-                    gr.Markdown("### 🎵 LeVo Models\n**Large** (★★★★★ Best, 22-28GB) | **Base Full** (★★★★ Good, 12-18GB)\nBoth support 4m30s songs • Chinese + English")
+                    gr.Markdown("### LeVo Models\n**SongGeneration v2 Large** (***** Best)\nSupports up to 4m30s songs - multilingual")
                     
                     # Reference audio section (moved above image upload)
-                    with gr.Accordion("📁 Reference Audio/Video (Advanced) - Maximum 10 seconds utilized", open=True):
+                    with gr.Accordion("Reference Audio/Video (Advanced) - Maximum 10 seconds utilized", open=True):
                         with gr.Row():
                             file_upload = gr.File(
                                 label="Upload Audio or Video File",
@@ -1912,7 +1944,7 @@ with gr.Blocks(title="SECourses LeVo Song Generation App",theme=gr.themes.Soft()
                         audio_path = gr.Textbox(visible=False)
                         upload_status = gr.Markdown("", visible=False)
                         
-                        with gr.Accordion("ℹ️ Reference Tips", open=False):
+                        with gr.Accordion("Info Reference Tips", open=False):
                             gr.Markdown("""
                             **Recommended Usage**
                             - Upload a clean vocal snippet or video clip featuring the target voice
@@ -1941,10 +1973,10 @@ with gr.Blocks(title="SECourses LeVo Song Generation App",theme=gr.themes.Soft()
                     
                     history_display = gr.HTML()
         
-        with gr.TabItem("⚙️ Advanced Settings"):
+        with gr.TabItem("Advanced Settings"):
             with gr.Row():
                 with gr.Column():
-                    gr.Markdown("⚙️ **Advanced Settings** - Optimized defaults for Large model. Modify carefully.")
+                    gr.Markdown("**Advanced Settings** - Optimized defaults for Large model. Modify carefully.")
                 
                     # Primary controls
                     with gr.Row():
@@ -1954,7 +1986,7 @@ with gr.Blocks(title="SECourses LeVo Song Generation App",theme=gr.themes.Soft()
                             maximum=6750,  # Max possible for Large/Base Full models
                             value=4500,  # Default to 3 minutes (good balance for Large model)
                             step=100,
-                            info="Controls song length (~25 steps/sec). 4500 (≈3m) is the balanced default; extend to 5200-6000 for full lyric arcs; 6750 (≈4m30s) is the Large/Base max."
+                            info="Controls song length (~25 steps/sec). 4500 (~3m) is the balanced default; extend to 5200-6000 for full lyric arcs; 6750 (~4m30s) is the Large/Base max."
                         )
                         diffusion_steps = gr.Slider(
                             label="Diffusion Steps", 
@@ -1962,7 +1994,7 @@ with gr.Blocks(title="SECourses LeVo Song Generation App",theme=gr.themes.Soft()
                             maximum=200, 
                             value=50, 
                             step=10,
-                            info="Detail polish. 30 = fast sketch, 50 = default, 70-90 = tighter mixes & stronger reference following, 120+ = ultra clean but ~2× slower."
+                            info="Detail polish. 30 = fast sketch, 50 = default, 70-90 = tighter mixes & stronger reference following, 120+ = ultra clean but ~2x slower."
                         )
                 
                     # Sampling parameters
@@ -2013,18 +2045,18 @@ with gr.Blocks(title="SECourses LeVo Song Generation App",theme=gr.themes.Soft()
 
                 
                 with gr.Column():
-                    gr.Markdown("### 🎮 VRAM Optimization")
-                    gr.Markdown("**Large: 22-28GB | Base Full: 12-18GB**. Disable optimizations on high-VRAM GPUs for faster generation.")
+                    gr.Markdown("### VRAM Optimization")
+                    gr.Markdown("Disable optimizations on GPUs with ample VRAM for faster generation.")
                     with gr.Row():
                         disable_offload = gr.Checkbox(label="Disable Model Offloading", value=False, 
-                                                    info="Keep models in VRAM. Enable on RTX 4090/A100 with 24GB+ VRAM for faster generation")
+                                                    info="Keep models in VRAM. Enable on GPUs with ample VRAM for faster generation")
                         disable_cache_clear = gr.Checkbox(label="Disable Cache Clearing", value=False,
                                                         info="Skip CUDA cache clearing between steps. Enable on high-VRAM GPUs (saves ~1-2s per generation)")
                     with gr.Row():
                         disable_fp16 = gr.Checkbox(label="Disable Float16 Autocast", value=False,
                                                  info="Use full precision. Not recommended - Large model requires FP16 (may crash if enabled)")
                         disable_sequential = gr.Checkbox(label="Disable Sequential Loading", value=False,
-                                                       info="Load all components simultaneously. Only for 32GB+ VRAM systems")
+                                                       info="Load all components simultaneously. Use only on systems with ample VRAM")
                     
                     gr.Markdown("### Advanced Generation Options")
                     # Advanced options
@@ -2075,10 +2107,10 @@ with gr.Blocks(title="SECourses LeVo Song Generation App",theme=gr.themes.Soft()
                             info="When recording tokens, pass the last N tokens to the sampler (`record_token_pool[-record_window:]`) for repetition checks; higher values mean more context but more memory."
                         )
             
-        with gr.TabItem("📁 Batch Processing"):
+        with gr.TabItem("Batch Processing"):
             with gr.Row():
                 with gr.Column():
-                    gr.Markdown("### 🚀 Batch Processing with Large Model")
+                    gr.Markdown("### Batch Processing with Large Model")
                     gr.Markdown("""
                     **Batch Processing:**
                     - Select a folder containing .txt files with prompts
@@ -2104,19 +2136,19 @@ with gr.Blocks(title="SECourses LeVo Song Generation App",theme=gr.themes.Soft()
                             info="Skip generation if output files already exist"
                         )
                     with gr.Row():
-                        batch_process_btn = gr.Button("🚀 Start Batch Processing", variant="primary")
+                        batch_process_btn = gr.Button("Start Batch Processing", variant="primary")
                     
                     # Batch status display
                     batch_status = gr.Markdown("", visible=False)
         
-        with gr.TabItem("📖 Song Structure Tags"):
-            gr.Markdown("## 🎵 Available Song Structure Tags")
+        with gr.TabItem("Song Structure Tags"):
+            gr.Markdown("## Available Song Structure Tags")
             gr.Markdown("Use these tags in your lyrics to control the song structure. **Large model supports complex structures with multiple sections up to 4m30s!**")
             
             with gr.Row():
                 with gr.Column():
                     gr.Markdown("""
-                    ### 🎤 Vocal Sections (REQUIRE lyrics):
+                    ### Vocal Sections (REQUIRE lyrics):
                     - **[verse]** - Main story/narrative sections (~20-30 seconds)
                       - Use for verses with lyrics
                       - Can have 2-3 verses in a full song
@@ -2129,7 +2161,7 @@ with gr.Blocks(title="SECourses LeVo Song Generation App",theme=gr.themes.Soft()
                       - Use for a different perspective/emotional shift with lyrics
                       - Usually appears once
                     
-                    ### 🎸 Instrumental Sections (NO lyrics):
+                    ### Instrumental Sections (NO lyrics):
                     
                     **Intro (Opening):**
                     - **[intro-short]** - ~5 seconds opening
@@ -2150,13 +2182,13 @@ with gr.Blocks(title="SECourses LeVo Song Generation App",theme=gr.themes.Soft()
                     **Special:**
                     - **[silence]** - ~2 seconds of silence
                     
-                    💡 **Large Model Tip**: With 4m30s capacity, create full songs with:
+                    **Large Model Tip**: With 4m30s capacity, create full songs with:
                     `[intro-medium]` + 2-3 `[verse]` + 3-4 `[chorus]` + 1 `[bridge]` + `[inst-medium]` + `[outro-medium]`
                     """)
                 
                 with gr.Column():
                     gr.Markdown("""
-                    ### 🎼 Example Song Structure:
+                    ### Example Song Structure:
                     ```
                     [intro-medium]
                     
@@ -2190,7 +2222,7 @@ with gr.Blocks(title="SECourses LeVo Song Generation App",theme=gr.themes.Soft()
                     [outro-long]
                     ```
                     
-                    ### 💡 Pro Tips:
+                    ### Pro Tips:
                     - **Place empty lines between sections** for clarity
                     - **Tags are case-insensitive**: `[VERSE]` = `[verse]`
                     - **Vocal sections MUST have lyrics**: `[verse]`, `[chorus]`, `[bridge]`
@@ -2198,13 +2230,13 @@ with gr.Blocks(title="SECourses LeVo Song Generation App",theme=gr.themes.Soft()
                     - Use consistent structure for professional results
                     - Instrumental breaks (`[inst-medium]`) work great between verses/chorus
                     
-                    ### ⚠️ Important Rules:
-                    - ✅ Valid: `[intro-medium]`, `[intro-short]`, `[intro-long]`
-                    - ❌ Invalid: `[intro]` alone (must specify length)
-                    - ✅ Valid: `[verse]` with lyrics, `[chorus]` with lyrics, `[bridge]` with lyrics
-                    - ❌ Invalid: Tags not in the list above (e.g., `[pre-chorus]`, `[rap]`, `[drop]`)
+                    ### Important Rules:
+                    - [OK] Valid: `[intro-medium]`, `[intro-short]`, `[intro-long]`
+                    - [ERROR] Invalid: `[intro]` alone (must specify length)
+                    - [OK] Valid: `[verse]` with lyrics, `[chorus]` with lyrics, `[bridge]` with lyrics
+                    - [ERROR] Invalid: Tags not in the list above (e.g., `[pre-chorus]`, `[rap]`, `[drop]`)
                     
-                    ### 🎵 Large Model Advantages:
+                    ### Music Large Model Advantages:
                     - **4m30s maximum length (6750 steps)** - Create full-length songs
                     - **Best audio quality** - Superior vocal clarity and instrumental separation
                     - **Better coherence** - Maintains musical consistency across long generations
@@ -2225,7 +2257,7 @@ with gr.Blocks(title="SECourses LeVo Song Generation App",theme=gr.themes.Soft()
         max_chars = int((current_model_max / 25.0) * 6.5 * 300 / 3750 * 1500)
         max_chars = min(max_chars, 5000)  # Cap at reasonable limit (increased for Large model)
 
-        # Determine target generation steps (25 steps ≈ 1 second in pipeline)
+        # Determine target generation steps (25 steps ~ 1 second in pipeline)
         fallback_steps = min(4500, current_model_max)
         try:
             requested_steps = float(max_generation_steps) if max_generation_steps is not None else fallback_steps
@@ -2253,15 +2285,15 @@ with gr.Blocks(title="SECourses LeVo Song Generation App",theme=gr.themes.Soft()
             )
 
             if requested_steps > current_model_max:
-                duration_str += " ⚠️ capped by model"
+                duration_str += " [WARN] capped by model"
         else:
             duration_str = " | Estimated duration: 0:00"
 
         # Character count warning based on current model
         if char_count > max_chars:
-            return f"⚠️ {char_count}/{max_chars} characters (will be truncated){duration_str}"
+            return f"[WARN] {char_count}/{max_chars} characters (will be truncated){duration_str}"
         elif char_count > max_chars * 0.93:  # 93% of limit
-            return f"⚠️ {char_count}/{max_chars} characters{duration_str}"
+            return f"[WARN] {char_count}/{max_chars} characters{duration_str}"
         else:
             return f"{char_count}/{max_chars} characters{duration_str}"
 
@@ -2409,7 +2441,7 @@ with gr.Blocks(title="SECourses LeVo Song Generation App",theme=gr.themes.Soft()
         # Safety check for parameter count (updated for new parameters)
         if len(param_values) != 38:  # Updated count including duration slider and auto prompt parameters
             error_msg = f"Invalid parameter count: expected 38, got {len(param_values)}"
-            print(f"❌ ERROR: {error_msg}")
+            print(f"[ERROR] {error_msg}")
             gr.Error(error_msg)
             return gr.Dropdown(choices=preset_manager.get_preset_list())
         
@@ -2464,7 +2496,7 @@ with gr.Blocks(title="SECourses LeVo Song Generation App",theme=gr.themes.Soft()
             # Return updated dropdown with new preset selected
             return gr.Dropdown(choices=preset_manager.get_preset_list(), value=preset_name)
         else:
-            print(f"❌ ERROR: {message}")
+            print(f"[ERROR] {message}")
             gr.Error(message)
             return gr.Dropdown(choices=preset_manager.get_preset_list())
     
@@ -2475,7 +2507,7 @@ with gr.Blocks(title="SECourses LeVo Song Generation App",theme=gr.themes.Soft()
         
         preset_data, message = preset_manager.load_preset(preset_name)
         if preset_data is None:
-            print(f"❌ ERROR: {message}")
+            print(f"[ERROR] {message}")
             gr.Error(message)
             return [gr.update()] * 38
         
@@ -2537,6 +2569,7 @@ with gr.Blocks(title="SECourses LeVo Song Generation App",theme=gr.themes.Soft()
         values['include_dropdown_attributes'] = bool(
             values.get('include_dropdown_attributes', defaults['include_dropdown_attributes'])
         )
+        values = sanitize_preset_dropdown_values(values)
 
         # Get current model's max generation length and clamp preset value
         current_max_length = 6750  # Default to Large model capacity
@@ -2703,7 +2736,7 @@ with gr.Blocks(title="SECourses LeVo Song Generation App",theme=gr.themes.Soft()
                 gr.update(visible=False),   # file_upload
                 gr.update(visible=True, value=file_path),  # audio_component
                 file_path,                  # audio_path
-                gr.update(visible=True, value="✅ Audio file loaded. You can use the trim feature above.")  # upload_status
+                gr.update(visible=True, value="[OK] Audio file loaded. You can use the trim feature above.")  # upload_status
             )
         elif file_ext in video_extensions:
             # Video file - extract audio and show status
@@ -2715,7 +2748,7 @@ with gr.Blocks(title="SECourses LeVo Song Generation App",theme=gr.themes.Soft()
                     gr.update(visible=True),   # file_upload
                     gr.update(visible=False),  # audio_component
                     "",                        # audio_path
-                    gr.update(visible=True, value=f"❌ Error: {error_msg}")  # upload_status
+                    gr.update(visible=True, value=f"[ERROR] Error: {error_msg}")  # upload_status
                 )
             else:
                 # Show extracted audio in audio component
@@ -2723,14 +2756,14 @@ with gr.Blocks(title="SECourses LeVo Song Generation App",theme=gr.themes.Soft()
                     gr.update(visible=False),   # file_upload
                     gr.update(visible=True, value=extracted_path),  # audio_component
                     extracted_path,             # audio_path
-                    gr.update(visible=True, value="✅ Audio extracted from video. You can use the trim feature above.")  # upload_status
+                    gr.update(visible=True, value="[OK] Audio extracted from video. You can use the trim feature above.")  # upload_status
                 )
         else:
             return (
                 gr.update(visible=True),   # file_upload
                 gr.update(visible=False),  # audio_component
                 "",                        # audio_path
-                gr.update(visible=True, value="❌ Unsupported file format")  # upload_status
+                gr.update(visible=True, value="[ERROR] Unsupported file format")  # upload_status
             )
     
     def update_audio_path(audio_value):
@@ -2842,7 +2875,7 @@ with gr.Blocks(title="SECourses LeVo Song Generation App",theme=gr.themes.Soft()
         # Check if this model is already loaded
         if CURRENT_MODEL_PATH == model_path and MODEL is not None:
             model_name = op.basename(model_path)
-            status = f"**Status**: ✅ {model_name} already loaded"
+            status = f"**Status**: [OK] {model_name} already loaded"
             max_length = MAX_GENERATION_LENGTHS.get(model_name, 6750)
             
             # Set appropriate default value
@@ -2858,12 +2891,12 @@ with gr.Blocks(title="SECourses LeVo Song Generation App",theme=gr.themes.Soft()
             return info, status, max_gen_update, duration_update
         
         # Auto-load the selected model
-        print(f"🔄 Auto-loading selected model: {op.basename(model_path)}")
+        print(f"[LOAD] Auto-loading selected model: {op.basename(model_path)}")
         success, message = load_model(model_path)
         
         if success:
             model_name = op.basename(model_path)
-            status = f"**Status**: ✅ {model_name} loaded successfully"
+            status = f"**Status**: [OK] {model_name} loaded successfully"
             max_length = MAX_GENERATION_LENGTHS.get(model_name, 6750)
             
             # Set appropriate default value
@@ -2878,7 +2911,7 @@ with gr.Blocks(title="SECourses LeVo Song Generation App",theme=gr.themes.Soft()
             duration_update = create_duration_slider_update(default_value, max_length)
             return info, status, max_gen_update, duration_update
         else:
-            status = f"**Status**: ❌ Failed to load model"
+            status = f"**Status**: [ERROR] Failed to load model"
             return info, status, gr.update(), gr.update()
     
     def handle_load_model(selected_model, progress=gr.Progress()):
@@ -2886,14 +2919,14 @@ with gr.Blocks(title="SECourses LeVo Song Generation App",theme=gr.themes.Soft()
         # If no models available, try to refresh the list
         if not model_choices:
             return (
-                "❌ No models found. Please refresh the list.",
+                "[ERROR] No models found. Please refresh the list.",
                 "**Status**: No models available",
                 gr.update(),
                 gr.update()
             )
         
         if not selected_model or selected_model not in model_paths:
-            return "❌ Please select a valid model", "**Status**: No model selected", gr.update(), gr.update()
+            return "[ERROR] Please select a valid model", "**Status**: No model selected", gr.update(), gr.update()
         
         model_path = model_paths[selected_model]
         
@@ -2903,7 +2936,7 @@ with gr.Blocks(title="SECourses LeVo Song Generation App",theme=gr.themes.Soft()
         success, message = load_model(model_path, progress_callback)
         
         if success:
-            status = f"**Status**: ✅ {op.basename(model_path)} loaded successfully"
+            status = f"**Status**: [OK] {op.basename(model_path)} loaded successfully"
             info = get_model_info(model_path)
 
             # Update max generation length based on loaded model
@@ -2926,7 +2959,7 @@ with gr.Blocks(title="SECourses LeVo Song Generation App",theme=gr.themes.Soft()
             
             return info, status, max_gen_update, duration_update
         else:
-            status = f"**Status**: ❌ Failed to load model"
+            status = f"**Status**: [ERROR] Failed to load model"
             return message, status, gr.update(), gr.update()
     
     def handle_refresh_models():
@@ -2939,12 +2972,12 @@ with gr.Blocks(title="SECourses LeVo Song Generation App",theme=gr.themes.Soft()
         model_paths = {f"{desc} ({model_dir})": path for model_dir, desc, path in available_models}
         
         if model_choices:
-            info = "✅ Models found! Select a model and click 'Load Selected Model'"
+            info = "[OK] Models found! Select a model and click 'Load Selected Model'"
             status = "**Status**: Models available"
             dropdown_update = gr.update(choices=model_choices, value=model_choices[0])
         else:
             info = """
-            ❌ **No models found!**
+            [ERROR] **No models found!**
             
             Please download models first using:
             ```bash
@@ -2989,11 +3022,11 @@ with gr.Blocks(title="SECourses LeVo Song Generation App",theme=gr.themes.Soft()
             first_model = model_choices[0]
             model_path = model_paths[first_model]
             
-            print(f"🔄 Auto-loading first available model: {op.basename(model_path)}")
+            print(f"[LOAD] Auto-loading first available model: {op.basename(model_path)}")
             success, message = load_model(model_path)
             
             if success:
-                status = f"**Status**: ✅ {op.basename(model_path)} auto-loaded"
+                status = f"**Status**: [OK] {op.basename(model_path)} auto-loaded"
                 info = get_model_info(model_path)
                 
                 # Update max generation length
@@ -3015,10 +3048,10 @@ with gr.Blocks(title="SECourses LeVo Song Generation App",theme=gr.themes.Soft()
                 
                 return info, status, max_gen_update, duration_update
             else:
-                status = f"**Status**: ⚠️ Auto-load failed - please select and load manually"
-                return "❌ Auto-load failed. Please select and load a model manually.", status, gr.update(), gr.update()
+                status = f"**Status**: [WARN] Auto-load failed - please select and load manually"
+                return "[ERROR] Auto-load failed. Please select and load a model manually.", status, gr.update(), gr.update()
         else:
-            return "❌ No models found. Please download models first.", "**Status**: No models available", gr.update(), gr.update()
+            return "[ERROR] No models found. Please download models first.", "**Status**: No models available", gr.update(), gr.update()
     
     demo.load(
         fn=auto_load_first_model,

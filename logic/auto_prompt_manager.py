@@ -1,125 +1,108 @@
-import os
+﻿import os
 import torch
 import numpy as np
-from typing import Optional, Dict, List, Tuple
+from typing import Optional, List, Tuple
 from utils.torch_load import load_torch_file
+
 
 class AutoPromptManager:
     """Manages automatic prompt audio selection based on genre/style"""
-    
+
     def __init__(self, app_dir: str):
-        """Initialize auto prompt manager
-        
-        Args:
-            app_dir: Application directory path
-        """
         self.app_dir = app_dir
-        self.auto_prompt_path = os.path.join(app_dir, 'tools', 'new_prompt.pt')
+        self.auto_prompt_path = os.path.join(app_dir, 'tools', 'new_auto_prompt.pt')
+        self.legacy_auto_prompt_path = os.path.join(app_dir, 'tools', 'new_prompt.pt')
         self.ckpt_prompt_path = os.path.join(app_dir, 'ckpt', 'prompt.pt')
         self.auto_prompt_data = None
-        # Auto prompt loading is intentionally disabled in the UI flow.
-        # The app uses manual reference audio uploads instead.
-    
+        self._load_auto_prompt_data()
+
     def _load_auto_prompt_data(self):
-        """Load auto prompt data from checkpoint"""
+        """Load auto prompt data from disk."""
         try:
-            # Try loading from tools directory first
-            if os.path.exists(self.auto_prompt_path):
-                self.auto_prompt_data = load_torch_file(self.auto_prompt_path, map_location='cpu')
-                print(f"✓ Auto prompt data loaded from: {self.auto_prompt_path}")
-            elif os.path.exists(self.ckpt_prompt_path):
-                self.auto_prompt_data = load_torch_file(self.ckpt_prompt_path, map_location='cpu')
-                print(f"✓ Auto prompt data loaded from: {self.ckpt_prompt_path}")
+            for candidate in [self.auto_prompt_path, self.legacy_auto_prompt_path, self.ckpt_prompt_path]:
+                if os.path.exists(candidate):
+                    self.auto_prompt_data = load_torch_file(candidate, map_location='cpu')
+                    print(f"[INFO] Auto prompt data loaded from: {candidate}")
+                    break
             else:
-                print("⚠️ Auto prompt data not found - auto prompt selection disabled")
+                print("[WARN] Auto prompt data not found - auto prompt selection disabled")
                 print(f"  Looked for: {self.auto_prompt_path}")
+                print(f"  Looked for: {self.legacy_auto_prompt_path}")
                 print(f"  Looked for: {self.ckpt_prompt_path}")
                 self.auto_prompt_data = None
-                
         except Exception as e:
-            print(f"⚠️ Failed to load auto prompt data: {e}")
+            print(f"[WARN] Failed to load auto prompt data: {e}")
             self.auto_prompt_data = None
-    
+
     def get_available_types(self) -> List[str]:
-        """Get list of available auto prompt types"""
+        """Get list of available auto prompt types."""
         if self.auto_prompt_data is None:
             return []
-        
+
         if isinstance(self.auto_prompt_data, dict):
-            return list(self.auto_prompt_data.keys())
-        else:
-            # Default types if data structure is different
-            return ['Pop', 'R&B', 'Dance', 'Jazz', 'Folk', 'Rock', 'Chinese Style', 'Chinese Tradition', 'Metal', 'Reggae', 'Chinese Opera', 'Auto']
-    
+            return sorted(self.auto_prompt_data.keys())
+
+        return ['Auto', 'Pop', 'Latin', 'Rock', 'Electronic', 'Metal', 'Country', 'R&B/Soul', 'Ballad', 'Jazz', 'World', 'Hip-Hop', 'Funk', 'Soundtrack']
+
     def get_auto_prompt_tokens(self, prompt_type: str) -> Optional[Tuple[torch.Tensor, torch.Tensor, torch.Tensor]]:
-        """Get auto prompt tokens for specified type
-        
-        Args:
-            prompt_type: Type of prompt ('Pop', 'Jazz', etc., or 'Auto' for random selection)
-            
-        Returns:
-            Tuple of (pmt_wav, vocal_wav, bgm_wav) tokens or None
-        """
+        """Get auto prompt tokens for the specified type."""
         if self.auto_prompt_data is None:
             return None
-        
+
         try:
-            # Handle "Auto" case - randomly select from all available genres
-            if prompt_type == "Auto":
+            if prompt_type == 'Auto':
+                all_prompts = []
                 if isinstance(self.auto_prompt_data, dict):
-                    # Merge all prompts from all genres
-                    all_prompts = []
-                    for genre, prompts in self.auto_prompt_data.items():
-                        if isinstance(prompts, list):
+                    for prompts in self.auto_prompt_data.values():
+                        if isinstance(prompts, dict):
+                            for prompt_list in prompts.values():
+                                if isinstance(prompt_list, list):
+                                    all_prompts.extend(prompt_list)
+                                elif prompt_list is not None:
+                                    all_prompts.append(prompt_list)
+                        elif isinstance(prompts, list):
                             all_prompts.extend(prompts)
-                        else:
+                        elif prompts is not None:
                             all_prompts.append(prompts)
-                    
-                    if len(all_prompts) > 0:
-                        selected_prompt = all_prompts[np.random.randint(0, len(all_prompts))]
-                        if hasattr(selected_prompt, 'shape') and len(selected_prompt.shape) >= 3:
-                            pmt_wav = selected_prompt[:, [0], :]
-                            vocal_wav = selected_prompt[:, [1], :]
-                            bgm_wav = selected_prompt[:, [2], :]
-                            return pmt_wav, vocal_wav, bgm_wav
+                if not all_prompts:
                     return None
-            
-            if isinstance(self.auto_prompt_data, dict) and prompt_type in self.auto_prompt_data:
+                selected_prompt = all_prompts[np.random.randint(0, len(all_prompts))]
+            elif isinstance(self.auto_prompt_data, dict) and prompt_type in self.auto_prompt_data:
                 prompt_tokens = self.auto_prompt_data[prompt_type]
-                
-                # Select random prompt from available options
-                if isinstance(prompt_tokens, list) and len(prompt_tokens) > 0:
+                if isinstance(prompt_tokens, dict):
+                    prompt_lists = [value for value in prompt_tokens.values() if isinstance(value, list) and value]
+                    if not prompt_lists:
+                        return None
+                    selected_group = prompt_lists[0]
+                    selected_prompt = selected_group[np.random.randint(0, len(selected_group))]
+                elif isinstance(prompt_tokens, list) and prompt_tokens:
                     selected_prompt = prompt_tokens[np.random.randint(0, len(prompt_tokens))]
                 else:
                     selected_prompt = prompt_tokens
-                
-                # Extract tokens (assuming format from original repo)
-                if hasattr(selected_prompt, 'shape') and len(selected_prompt.shape) >= 3:
-                    pmt_wav = selected_prompt[:, [0], :]
-                    vocal_wav = selected_prompt[:, [1], :]
-                    bgm_wav = selected_prompt[:, [2], :]
-                    return pmt_wav, vocal_wav, bgm_wav
-                else:
-                    print(f"⚠️ Unexpected prompt token format for {prompt_type}")
-                    return None
             else:
-                print(f"⚠️ Auto prompt type '{prompt_type}' not found")
+                print(f"[WARN] Auto prompt type '{prompt_type}' not found")
                 return None
-                
+
+            if hasattr(selected_prompt, 'shape') and len(selected_prompt.shape) >= 3:
+                pmt_wav = selected_prompt[:, [0], :]
+                vocal_wav = selected_prompt[:, [1], :]
+                bgm_wav = selected_prompt[:, [2], :]
+                return pmt_wav, vocal_wav, bgm_wav
+
+            print(f"[WARN] Unexpected prompt token format for {prompt_type}")
+            return None
         except Exception as e:
             print(f"Error getting auto prompt tokens for {prompt_type}: {e}")
             return None
-    
+
     def is_available(self) -> bool:
-        """Check if auto prompt system is available"""
         return self.auto_prompt_data is not None
-    
+
     def get_fallback_prompt_path(self) -> str:
-        """Get fallback prompt path for manual loading"""
+        if os.path.exists(self.auto_prompt_path):
+            return self.auto_prompt_path
+        if os.path.exists(self.legacy_auto_prompt_path):
+            return self.legacy_auto_prompt_path
         if os.path.exists(self.ckpt_prompt_path):
             return self.ckpt_prompt_path
-        elif os.path.exists(self.auto_prompt_path):
-            return self.auto_prompt_path
-        else:
-            # Create a dummy prompt file path
-            return os.path.join(self.app_dir, 'ckpt', 'prompt.pt')
+        return self.auto_prompt_path

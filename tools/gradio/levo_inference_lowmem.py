@@ -5,6 +5,7 @@ import sys
 import torch
 
 import json
+import re
 import numpy as np
 from omegaconf import OmegaConf
 
@@ -19,6 +20,98 @@ from codeclm.utils.offload_profiler import OffloadProfiler, OffloadParamParse
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 from utils.suppress_output import suppress_output, disable_verbose_logging
 from utils.torch_load import load_torch_file
+
+APP_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+AUTO_PROMPT_CANDIDATES = (
+    os.path.join(APP_DIR, "tools", "new_auto_prompt.pt"),
+    os.path.join(APP_DIR, "tools", "new_prompt.pt"),
+    os.path.join(APP_DIR, "ckpt", "prompt.pt"),
+)
+
+
+def detect_model_version(ckpt_path: str) -> str:
+    model_name = os.path.basename(os.path.normpath(ckpt_path)).lower().replace('-', '_')
+    if model_name == "songgeneration_v2_large":
+        return "v2"
+    return "v1"
+
+
+def detect_language(text: str) -> str:
+    if not text:
+        return "en"
+    chinese_count = len(re.findall(r'[\u4e00-\u9fff]', text))
+    english_count = len(re.findall(r'[a-zA-Z]', text))
+    total = chinese_count + english_count
+    if total == 0:
+        return "en"
+    if chinese_count / total >= 0.2:
+        return "zh"
+    if english_count / total >= 0.5:
+        return "en"
+    return "en"
+
+
+def load_auto_prompt_data(auto_prompt_path: os.PathLike = None):
+    candidate_paths = [auto_prompt_path] if auto_prompt_path else list(AUTO_PROMPT_CANDIDATES)
+    for candidate in candidate_paths:
+        if candidate and os.path.exists(candidate):
+            return load_torch_file(candidate, map_location='cpu')
+    return None
+
+
+def _choose_prompt_token(prompt_group, language: str):
+    if isinstance(prompt_group, dict):
+        preferred = prompt_group.get(language)
+        if isinstance(preferred, list) and preferred:
+            return preferred[np.random.randint(0, len(preferred))]
+        for prompts in prompt_group.values():
+            if isinstance(prompts, list) and prompts:
+                return prompts[np.random.randint(0, len(prompts))]
+        return None
+    if isinstance(prompt_group, list) and prompt_group:
+        return prompt_group[np.random.randint(0, len(prompt_group))]
+    return prompt_group
+
+
+def select_auto_prompt_token(auto_prompt, genre: str, lyric: str):
+    if not isinstance(auto_prompt, dict):
+        return None
+    language = detect_language(lyric)
+    if genre == "Auto":
+        auto_group = auto_prompt.get("Auto")
+        prompt_token = _choose_prompt_token(auto_group, language)
+        if prompt_token is not None:
+            return prompt_token
+        merged_prompts = []
+        for value in auto_prompt.values():
+            if isinstance(value, dict):
+                for prompts in value.values():
+                    if isinstance(prompts, list):
+                        merged_prompts.extend(prompts)
+            elif isinstance(value, list):
+                merged_prompts.extend(value)
+            elif value is not None:
+                merged_prompts.append(value)
+        if merged_prompts:
+            return merged_prompts[np.random.randint(0, len(merged_prompts))]
+        return None
+    return _choose_prompt_token(auto_prompt.get(genre), language)
+
+
+def prepare_condition_inputs(lyric: str, description: str, gen_type: str, version: str):
+    normalized_description = (description or ".").strip()
+    normalized_lyric = lyric.replace("  ", " ")
+    if version != "v1":
+        normalized_description = normalized_description.lower() if normalized_description else "."
+        if gen_type == "bgm":
+            normalized_description = f"[Musicality-very-high], [Pure-Music], {normalized_description}"
+            normalized_lyric = "."
+        elif "[Musicality-very-high]" not in normalized_description:
+            normalized_description = f"[Musicality-very-high], {normalized_description}"
+    else:
+        if "[Musicality-very-high]" not in normalized_description:
+            normalized_description = f"[Musicality-very-high], {normalized_description}"
+    return normalized_lyric, normalized_description
 
 
 class LeVoInference(torch.nn.Module):
@@ -80,6 +173,7 @@ class LeVoInference(torch.nn.Module):
         self.cfg = OmegaConf.load(cfg_path)
         self.cfg.mode = 'inference'
         self.max_duration = self.cfg.max_dur
+        self.version = detect_model_version(ckpt_path)
 
         self.default_params = dict(
             top_p = 0.0,
@@ -161,18 +255,20 @@ class LeVoInference(torch.nn.Module):
                 if progress_callback:
                     progress_callback({'phase': 'Error', 'message': f'Audio processing failed: {str(e)}'})
                 raise
-        elif genre is not None and auto_prompt_path is not None:
+        elif genre is not None:
             with suppress_output():
-                auto_prompt = load_torch_file(auto_prompt_path, map_location='cpu')
-            merge_prompt = [item for sublist in auto_prompt.values() for item in sublist]
-            if genre == "Auto": 
-                prompt_token = merge_prompt[np.random.randint(0, len(merge_prompt))]
+                auto_prompt = load_auto_prompt_data(auto_prompt_path)
+            prompt_token = select_auto_prompt_token(auto_prompt, genre, lyric)
+            if prompt_token is not None:
+                pmt_wav = prompt_token[:, [0], :]
+                vocal_wav = prompt_token[:, [1], :]
+                bgm_wav = prompt_token[:, [2], :]
+                melody_is_wav = False
             else:
-                prompt_token = auto_prompt[genre][np.random.randint(0, len(auto_prompt[genre]))]
-            pmt_wav = prompt_token[:,[0],:]
-            vocal_wav = prompt_token[:,[1],:]
-            bgm_wav = prompt_token[:,[2],:]
-            melody_is_wav = False
+                pmt_wav = None
+                vocal_wav = None
+                bgm_wav = None
+                melody_is_wav = True
         else:
             pmt_wav = None
             vocal_wav = None
@@ -188,7 +284,7 @@ class LeVoInference(torch.nn.Module):
             progress_callback({'phase': 'Loading models', 'message': 'Loading language model...'})
 
         with suppress_output():
-            audiolm = builders.get_lm_model(self.cfg)
+            audiolm = builders.get_lm_model(self.cfg, version=self.version)
             checkpoint = torch.load(self.pt_path, map_location='cpu')
             audiolm_state_dict = {k.replace('audiolm.', ''): v for k, v in checkpoint.items() if k.startswith('audiolm')}
             audiolm.load_state_dict(audiolm_state_dict, strict=False)
@@ -213,23 +309,27 @@ class LeVoInference(torch.nn.Module):
             seperate_tokenizer = None,
         )
         # Extract parameters that are not for set_generation_params
-        num_steps = params.pop('num_steps', 50)
-        guidance_scale = params.pop('guidance_scale', 1.5)
-        chunked = params.pop('chunked', True)
-        chunk_size = params.pop('chunk_size', 128)
+        generation_params = {**self.default_params, **(params or {})}
+        num_steps = generation_params.pop('num_steps', 50)
+        guidance_scale = generation_params.pop('guidance_scale', 1.5)
+        chunked = generation_params.pop('chunked', True)
+        chunk_size = generation_params.pop('chunk_size', 128)
         # Merge with defaults and set generation params
-        params = {**self.default_params, **params}
-        extend_stride_value = params.get('extend_stride', self.default_params.get('extend_stride', 5))
+        extend_stride_value = generation_params.get('extend_stride', self.default_params.get('extend_stride', 5))
         try:
             extend_stride_value = float(extend_stride_value)
         except (TypeError, ValueError):
             extend_stride_value = self.default_params.get('extend_stride', 5)
         extend_stride_value = max(0.0, min(extend_stride_value, self.max_duration))
-        model.set_generation_params(**params)
+        model.set_generation_params(**generation_params)
+
+        prepared_lyric, prepared_description = prepare_condition_inputs(
+            lyric, description, gen_type, self.version
+        )
 
         generate_inp = {
-            'lyrics': [lyric.replace("  ", " ")],
-            'descriptions': [description],
+            'lyrics': [prepared_lyric],
+            'descriptions': [prepared_description],
             'melody_wavs': pmt_wav,
             'vocal_wavs': vocal_wav,
             'bgm_wavs': bgm_wav,
