@@ -239,8 +239,29 @@ class BatchProcessor:
             'wav': wav_path,
             'mp3': None,
             'mp4': None,
-            'base_name': base_name
+            'base_name': base_name,
+            'vocal_wav': None,
+            'bgm_wav': None,
+            'vocal_mp3': None,
+            'bgm_mp3': None
         }
+
+        # Save separate stems when requested.
+        if params.get('gen_type') == 'separate':
+            vocal_audio_data = generation_result.get('vocal_audio_data')
+            bgm_audio_data = generation_result.get('bgm_audio_data')
+
+            if vocal_audio_data is not None:
+                vocal_wav_path = os.path.join(output_folder, f"{base_name}_vocal.wav")
+                wavfile.write(vocal_wav_path, self.model_cfg.sample_rate, vocal_audio_data)
+                result['vocal_wav'] = vocal_wav_path
+                print(f"Generated vocal stem saved to: {vocal_wav_path}")
+
+            if bgm_audio_data is not None:
+                bgm_wav_path = os.path.join(output_folder, f"{base_name}_bgm.wav")
+                wavfile.write(bgm_wav_path, self.model_cfg.sample_rate, bgm_audio_data)
+                result['bgm_wav'] = bgm_wav_path
+                print(f"Generated BGM stem saved to: {bgm_wav_path}")
         
         # Convert to MP3 if requested
         if params.get('save_mp3', True):
@@ -248,6 +269,18 @@ class BatchProcessor:
             if convert_wav_to_mp3(wav_path, mp3_path):
                 result['mp3'] = mp3_path
                 print(f"Generated MP3 saved to: {mp3_path}")
+
+            if result['vocal_wav']:
+                vocal_mp3_path = os.path.join(output_folder, f"{base_name}_vocal.mp3")
+                if convert_wav_to_mp3(result['vocal_wav'], vocal_mp3_path):
+                    result['vocal_mp3'] = vocal_mp3_path
+                    print(f"Generated vocal MP3 saved to: {vocal_mp3_path}")
+
+            if result['bgm_wav']:
+                bgm_mp3_path = os.path.join(output_folder, f"{base_name}_bgm.mp3")
+                if convert_wav_to_mp3(result['bgm_wav'], bgm_mp3_path):
+                    result['bgm_mp3'] = bgm_mp3_path
+                    print(f"Generated BGM MP3 saved to: {bgm_mp3_path}")
         
         # Create video if image provided
         if params.get('image_path'):

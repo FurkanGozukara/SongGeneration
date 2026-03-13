@@ -46,7 +46,7 @@ def _load_valid_structures() -> List[str]:
     return _VALID_STRUCTURES_CACHE
 
 
-def normalize_lyrics(lyrics: str) -> str:
+def normalize_lyrics(lyrics: str, require_vocal: bool = True) -> str:
     """Normalize lyrics to the model's expected format with validation."""
     if not lyrics or not lyrics.strip():
         raise ValueError("Lyrics cannot be empty")
@@ -94,7 +94,7 @@ def normalize_lyrics(lyrics: str) -> str:
     if not normalized_parts:
         raise ValueError("No valid paragraphs found")
 
-    if not has_vocal:
+    if require_vocal and not has_vocal:
         raise ValueError(f"Lyrics must contain at least one vocal structure: {', '.join(sorted(_VOCAL_STRUCTURES))}")
 
     return " ; ".join(normalized_parts)
@@ -336,9 +336,9 @@ def get_next_file_number(output_dir):
     
     return max(numbers) + 1 if numbers else 1
 
-def format_lyrics_for_model(lyrics):
+def format_lyrics_for_model(lyrics, require_vocal: bool = True):
     """Format lyrics according to the model's expected format"""
-    return normalize_lyrics(lyrics)
+    return normalize_lyrics(lyrics, require_vocal=require_vocal)
 
 def generate_single_song(model, params, progress_tracker=None, cancellation_token=None):
     """Generate a single song with the given parameters"""
@@ -357,9 +357,12 @@ def generate_single_song(model, params, progress_tracker=None, cancellation_toke
         used_seed = random.randint(0, 2147483647)
     set_seed(used_seed)
     
+    requested_gen_type = params.get('gen_type', 'mixed')
+    require_vocal_lyrics = requested_gen_type != 'bgm'
+
     # Format lyrics
     try:
-        formatted_lyrics = normalize_lyrics(params['lyrics'])
+        formatted_lyrics = normalize_lyrics(params['lyrics'], require_vocal=require_vocal_lyrics)
     except ValueError as exc:
         raise ValueError(f"Lyrics validation failed: {exc}") from exc
     
@@ -422,13 +425,15 @@ def generate_single_song(model, params, progress_tracker=None, cancellation_toke
         def internal_progress_callback(info):
             progress_tracker.update(phase=info.get('phase', ''), message=info.get('message', ''))
     
+    primary_gen_type = 'mixed' if requested_gen_type == 'separate' else requested_gen_type
+
     audio_data = model(
         formatted_lyrics,
         description,
         audio_path,
         None,
         params.get('auto_prompt_path'),
-        params['gen_type'],
+        primary_gen_type,
         gen_params,
         disable_offload=params.get('disable_offload', False),
         disable_cache_clear=params.get('disable_cache_clear', False),
@@ -442,6 +447,56 @@ def generate_single_song(model, params, progress_tracker=None, cancellation_toke
         return None
         
     audio_data = audio_data.cpu().permute(1, 0).float().numpy()
+
+    vocal_audio_data = None
+    bgm_audio_data = None
+    if requested_gen_type == 'separate':
+        if progress_tracker:
+            progress_tracker.update(
+                phase="Generating separation tracks",
+                message="Rendering vocal and BGM tracks..."
+            )
+        if cancellation_token and cancellation_token.is_cancelled():
+            return None
+
+        vocal_audio = model(
+            formatted_lyrics,
+            description,
+            audio_path,
+            None,
+            params.get('auto_prompt_path'),
+            'vocal',
+            gen_params,
+            disable_offload=params.get('disable_offload', False),
+            disable_cache_clear=params.get('disable_cache_clear', False),
+            disable_fp16=params.get('disable_fp16', False),
+            disable_sequential=params.get('disable_sequential', False),
+            progress_callback=internal_progress_callback,
+            cancellation_token=cancellation_token
+        )
+        if vocal_audio is not None:
+            vocal_audio_data = vocal_audio.cpu().permute(1, 0).float().numpy()
+
+        if cancellation_token and cancellation_token.is_cancelled():
+            return None
+
+        bgm_audio = model(
+            formatted_lyrics,
+            description,
+            audio_path,
+            None,
+            params.get('auto_prompt_path'),
+            'bgm',
+            gen_params,
+            disable_offload=params.get('disable_offload', False),
+            disable_cache_clear=params.get('disable_cache_clear', False),
+            disable_fp16=params.get('disable_fp16', False),
+            disable_sequential=params.get('disable_sequential', False),
+            progress_callback=internal_progress_callback,
+            cancellation_token=cancellation_token
+        )
+        if bgm_audio is not None:
+            bgm_audio_data = bgm_audio.cpu().permute(1, 0).float().numpy()
     
     # Check cancellation after generation
     if cancellation_token and cancellation_token.is_cancelled():
@@ -449,6 +504,8 @@ def generate_single_song(model, params, progress_tracker=None, cancellation_toke
     
     return {
         'audio_data': audio_data,
+        'vocal_audio_data': vocal_audio_data,
+        'bgm_audio_data': bgm_audio_data,
         'used_seed': used_seed,
         'formatted_lyrics': formatted_lyrics
     }

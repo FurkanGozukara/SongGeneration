@@ -382,10 +382,11 @@ def load_options(filename):
         return sorted(options)  # Sort alphabetically
 
 # Load vocabulary structures for validation
-def validate_lyrics_structure(lyrics):
-    """Validate and normalize lyrics structure against vocabulary"""
+def validate_lyrics_structure(lyrics, gen_type='mixed'):
+    """Validate and normalize lyrics structure against vocabulary."""
     try:
-        normalized = format_lyrics_for_model(lyrics)
+        require_vocal = gen_type != 'bgm'
+        normalized = format_lyrics_for_model(lyrics, require_vocal=require_vocal)
     except ValueError as exc:
         return False, str(exc), None
     return True, "Lyrics structure is valid", normalized
@@ -976,7 +977,7 @@ def submit_lyrics(
     progress_callback = create_progress_callback(gradio_progress_tracker, progress)
     
     # Validate lyrics structure first
-    is_valid, validation_message, normalized_lyrics = validate_lyrics_structure(lyrics)
+    is_valid, validation_message, normalized_lyrics = validate_lyrics_structure(lyrics, gen_type)
     if not is_valid:
         error_msg = f"Lyrics validation failed: {validation_message}"
         print(f"[ERROR] {error_msg}")
@@ -1144,6 +1145,9 @@ def submit_lyrics(
                     'melody_is_wav': song_data["melody_is_wav"]
                 }
                 
+                # `separate` is a UI orchestration mode. Main render must run as mixed.
+                primary_gen_type = 'mixed' if song_data["gen_type"] == 'separate' else song_data["gen_type"]
+
                 # Call model with correct interface matching original
                 audio_data = MODEL(
                     lyric=song_data["lyrics"],
@@ -1151,7 +1155,7 @@ def submit_lyrics(
                     prompt_audio_path=song_data["audio_path"] if song_data["sample_prompt"] else None,
                     genre=None,
                     auto_prompt_path=None,
-                    gen_type=song_data["gen_type"],
+                    gen_type=primary_gen_type,
                     params=gen_params,
                     disable_offload=disable_offload,
                     disable_cache_clear=disable_cache_clear,
@@ -1350,13 +1354,14 @@ def submit_lyrics(
                             print(f"Using reference audio for consistent voice")
                         print("="*80 + "\n")
                         
+                        primary_gen_type = 'mixed' if gen_type == 'separate' else gen_type
                         audio_data = MODEL(
                             song_data["lyrics"], 
                             generation_description,
                             song_data["audio_path"] if song_data["sample_prompt"] else None,
                             None,
                             op.join(APP_DIR, "ckpt/prompt.pt"),
-                            gen_type,
+                            primary_gen_type,
                             gen_params,
                             disable_offload=disable_offload,
                             disable_cache_clear=disable_cache_clear,
@@ -1400,7 +1405,9 @@ def submit_lyrics(
                             disable_offload=disable_offload,
                             disable_cache_clear=disable_cache_clear,
                             disable_fp16=disable_fp16,
-                            disable_sequential=disable_sequential
+                            disable_sequential=disable_sequential,
+                            progress_callback=progress_callback,
+                            cancellation_token=cancellation_token
                         )
                         
                         if vocal_audio_data is not None:
@@ -1418,7 +1425,9 @@ def submit_lyrics(
                             disable_offload=disable_offload,
                             disable_cache_clear=disable_cache_clear,
                             disable_fp16=disable_fp16,
-                            disable_sequential=disable_sequential
+                            disable_sequential=disable_sequential,
+                            progress_callback=progress_callback,
+                            cancellation_token=cancellation_token
                         )
                         
                         if bgm_audio_data is not None:
@@ -1519,22 +1528,22 @@ def submit_lyrics(
                     except Exception as ref_err:
                         reference_copy_path = None
                         output_messages(f"[WARN] Unable to copy processed reference audio: {ref_err}")
-                    
-                    # Separate tracks MP3
-                    if gen_type == 'separate':
-                        if vocal_wav_path:
-                            vocal_mp3_path = op.join(output_dir, f"{base_filename}_vocal.mp3")
-                            if convert_wav_to_mp3(vocal_wav_path, vocal_mp3_path, '192k'):
-                                output_messages(f"OK Vocal MP3 saved: {base_filename}_vocal.mp3")
-                            else:
-                                vocal_mp3_path = None
-                        
-                        if bgm_wav_path:
-                            bgm_mp3_path = op.join(output_dir, f"{base_filename}_bgm.mp3")
-                            if convert_wav_to_mp3(bgm_wav_path, bgm_mp3_path, '192k'):
-                                output_messages(f"OK BGM MP3 saved: {base_filename}_bgm.mp3")
-                            else:
-                                bgm_mp3_path = None
+
+                # Separate tracks MP3 conversion should run regardless of reference-audio branch.
+                if save_mp3 and gen_type == 'separate':
+                    if vocal_wav_path:
+                        vocal_mp3_path = op.join(output_dir, f"{base_filename}_vocal.mp3")
+                        if convert_wav_to_mp3(vocal_wav_path, vocal_mp3_path, '192k'):
+                            output_messages(f"OK Vocal MP3 saved: {base_filename}_vocal.mp3")
+                        else:
+                            vocal_mp3_path = None
+
+                    if bgm_wav_path:
+                        bgm_mp3_path = op.join(output_dir, f"{base_filename}_bgm.mp3")
+                        if convert_wav_to_mp3(bgm_wav_path, bgm_mp3_path, '192k'):
+                            output_messages(f"OK BGM MP3 saved: {base_filename}_bgm.mp3")
+                        else:
+                            bgm_mp3_path = None
                 
                 # Create video if image is provided
                 video_path = None
@@ -1603,7 +1612,7 @@ def submit_lyrics(
 
 # Create Gradio interface
 with gr.Blocks(title="SECourses LeVo Song Generation App",theme=gr.themes.Soft()) as demo:
-    gr.Markdown("# SECourses Premium LeVo Song Generator V10.0 - Up to 4m30s Songs - https://www.patreon.com/posts/135592123")
+    gr.Markdown("# SECourses Premium LeVo Song Generator V10.1 - Up to 4m30s Songs - https://www.patreon.com/posts/135592123")
     
     history = gr.State([])
     session = gr.State({})
@@ -1791,8 +1800,23 @@ with gr.Blocks(title="SECourses LeVo Song Generation App",theme=gr.themes.Soft()
                             label="Generation Type",
                             choices=GENERATION_TYPES,
                             value="mixed",
-                            info="mixed: vocals+BGM combined | vocal: vocals only | bgm: music only | separate: vocals and BGM as separate files"
+                            info=(
+                                "Choose output mode. "
+                                "mixed=full song, vocal=vocals only, bgm=instrumental only, "
+                                "separate=exports mixed + vocal stem + bgm stem (slower)."
+                            )
                         )
+
+                    gr.Markdown(
+                        """
+**Generation Mode Notes**
+- `mixed`: One full song output with vocals and instruments together. Fastest full-song mode.
+- `vocal`: Vocals-focused render. Background music is suppressed in decode.
+- `bgm`: Instrumental/no-vocal render. Uses pure-music conditioning and does not require vocal sections in lyrics validation.
+- `separate`: Produces three outputs for each generation: main mix (`.wav/.flac/.mp3`), vocal stem (`_vocal`), and instrumental stem (`_bgm`).
+- `separate` runtime cost: this mode runs extra model passes (`mixed` + `vocal` + `bgm`), so expect notably longer generation time than `mixed`.
+                        """
+                    )
                     
                     with gr.Row():
                         save_mp3_check = gr.Checkbox(label="Also save as MP3 (192 kbps)", value=True)
