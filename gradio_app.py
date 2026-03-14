@@ -125,7 +125,7 @@ GENERATION_TYPES = ['mixed', 'vocal', 'bgm', 'separate']
 AUTO_PROMPT_TYPES = ['Auto', 'Pop', 'Latin', 'Rock', 'Electronic', 'Metal', 'Country', 'R&B/Soul', 'Ballad', 'Jazz', 'World', 'Hip-Hop', 'Funk', 'Soundtrack']
 
 # Extended generation length support based on model version
-# Only two officially supported models
+# Only the SongGeneration v2 Large model is officially supported
 MAX_GENERATION_LENGTHS = {
     'songgeneration_v2_large': 6750,  # ~4m30s - BEST QUALITY
 }
@@ -481,7 +481,7 @@ def load_model(model_path, progress_callback=None):
 def get_model_info(model_path):
     """Get information about a model"""
     if not model_path:
-        return "No model selected"
+        return "Model: songgeneration_v2_large"
     
     model_name = op.basename(model_path)
     
@@ -499,19 +499,12 @@ def get_model_info(model_path):
     
     specs = model_specs.get(model_name, {})
     
-    info = f"""
-### {specs.get('quality', 'Unknown')} Quality Model
-
-**Model**: `{model_name}`
-**Max Length**: {specs.get('length', 'Unknown')}
-**Max Steps**: {specs.get('steps', 'Unknown')}
-**Languages**: {specs.get('languages', 'Unknown')}
-**VRAM**: {specs.get('vram', 'Unknown')}
-**Note**: {specs.get('notes', 'N/A')}
-**Status**: {'[OK] **LOADED**' if CURRENT_MODEL_PATH == model_path else 'Not loaded'}
-"""
-    
-    return info
+    return (
+        f"Model: {model_name}  \n"
+        f"Max Length: {specs.get('length', 'Unknown')}  \n"
+        f"Max Steps: {specs.get('steps', 'Unknown')}  \n"
+        f"Languages: {specs.get('languages', 'Unknown')}"
+    )
 
 # Load description options from text files
 def load_options(filename):
@@ -889,7 +882,7 @@ def run_batch_processing(
     """Run batch processing with progress tracking"""
     # Check if model is loaded
     if MODEL is None:
-        error_msg = "[ERROR] No model loaded! Please select and load a model first."
+        error_msg = "[ERROR] No model loaded! The default model did not auto-load. Check the checkpoint files and restart the app."
         print(f"[ERROR] {error_msg}")
         gr.Error(error_msg)
         return error_msg
@@ -1115,7 +1108,7 @@ def submit_lyrics(
 ):
     # Check if model is loaded
     if MODEL is None:
-        error_msg = "[ERROR] No model loaded!\n\nPlease select a model from the dropdown and click '[LOAD] Load Selected Model' before generating."
+        error_msg = "[ERROR] No model loaded!\n\nThe default model did not auto-load. Check the checkpoint files and restart the app."
         print(error_msg)
         yield None, None, history, process_history(history), gr.update(visible=False), gr.update(value=error_msg, visible=True)
         return
@@ -1811,40 +1804,35 @@ with gr.Blocks(title="SECourses LeVo Song Generation App", theme=gr.themes.Soft(
     history = gr.State([])
     session = gr.State({})
     
-    # Model Selection Section
+    # Model Section
+    available_models = get_available_models()
+    model_choices = [f"{desc} ({model_dir})" for model_dir, desc, _ in available_models]
+    model_paths = {f"{desc} ({model_dir})": path for model_dir, desc, path in available_models}
+    default_model_choice = model_choices[0] if model_choices else None
+    default_model_path = model_paths.get(default_model_choice) if default_model_choice else None
+
     with gr.Row():
-        with gr.Column(scale=3):
-            available_models = get_available_models()
-            model_choices = [f"{desc} ({model_dir})" for model_dir, desc, _ in available_models]
-            model_paths = {f"{desc} ({model_dir})": path for model_dir, desc, path in available_models}
-            
-            model_dropdown = gr.Dropdown(
-                label="Select SongGeneration Model",
-                choices=model_choices,
-                value=model_choices[0] if model_choices else None,
-                info="SongGeneration v2 Large (BEST) - supports up to 4m30s songs"
+        if not model_choices:
+            model_info_display = gr.Markdown(
+                "[ERROR] **No models found!**\n\n"
+                "Please make sure `ckpt/songgeneration_v2_large` contains `config.yaml` and `model.pt`."
             )
-        
-        with gr.Column(scale=2):
-            if not model_choices:
-                model_info_display = gr.Markdown("""
-                [ERROR] **No models found!**
-                
-                Please download models first using:
-                ```bash
-                python Download_Song_Models.py --model model_large
-                ```
-                or
-                ```bash  
-                python Download_Song_Models.py --model model_base
-                ```
-                """)
-                load_model_btn = gr.Button("[LOAD] Refresh Model List", variant="secondary")
-            else:
-                model_info_display = gr.Markdown("Select a model to see details")
-                load_model_btn = gr.Button("[LOAD] Load Selected Model", variant="primary")
-            
-            model_status = gr.Markdown("**Status**: No model loaded", elem_id="model-status")
+        else:
+            model_info_display = gr.Markdown(get_model_info(default_model_path))
+
+        model_dropdown = gr.Dropdown(
+            label="Select SongGeneration Model",
+            choices=model_choices,
+            value=default_model_choice,
+            info="SongGeneration v2 Large - supports up to 4m30s songs",
+            visible=False
+        )
+        load_model_btn = gr.Button(
+            "[LOAD] Load Selected Model" if model_choices else "[LOAD] Refresh Model List",
+            variant="primary" if model_choices else "secondary",
+            visible=False
+        )
+        model_status = gr.Markdown("", elem_id="model-status", visible=False)
     
     # Add cancel button at the top
     with gr.Row():
@@ -1865,7 +1853,7 @@ with gr.Blocks(title="SECourses LeVo Song Generation App", theme=gr.themes.Soft(
                         value=EXAMPLE_LYRICS,
                         lines=15,
                         max_lines=20,
-                        info="Both models support up to ~5000 characters for 4m30s songs (Large: best quality, Base Full: good quality)"
+                        info="Supports up to ~5000 characters for 4m30s songs"
                     )
                     
                     # Character counter and duration display
