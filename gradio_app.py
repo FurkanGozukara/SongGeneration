@@ -1080,7 +1080,7 @@ def submit_lyrics(
     
     # Log the actual values for debugging
     output_messages(
-        f"Requested target: {max_gen_length} LM steps (~{duration_from_steps:.1f}s, "
+        f"Requested target: {max_gen_length} LLM steps (~{duration_from_steps:.1f}s, "
         f"{int(duration_from_steps/60)}m{int(duration_from_steps%60)}s). "
         "Final rendered length is reported after generation completes."
     )
@@ -1773,37 +1773,37 @@ with gr.Blocks(title="SECourses LeVo Song Generation App",theme=gr.themes.Soft()
                             )
                             with gr.Row():
                                 enable_lm_mlp_int8 = gr.Checkbox(
-                                    label="Enable LM MLP-Only Int8",
+                                    label="Enable LLM MLP-Only Int8",
                                     value=False,
-                                    info="Experimental. Quantizes only the large LM MLP linears to int8 to cut VRAM. This mainly saves VRAM, not speed."
+                                    info="Experimental. Quantizes only the large LLM MLP linears to int8 to cut VRAM. Can be combined with model offloading. This mainly saves VRAM, not speed."
                                 )
                             with gr.Row():
                                 enable_lm_block_swap = gr.Checkbox(
-                                    label="Enable LM Block Swap",
+                                    label="Enable LLM Block Swap",
                                     value=False,
-                                    info="Swap LM transformer blocks between CPU and GPU during token generation to reduce peak VRAM."
+                                    info="Swap LLM transformer blocks between CPU and GPU during token generation to reduce peak VRAM."
                                 )
                                 lm_block_swap_use_pinned = gr.Checkbox(
-                                    label="Use Pinned Memory For LM Swap",
+                                    label="Use Pinned Memory For LLM Swap",
                                     value=True,
                                     info="Recommended for block swap. Can improve swap throughput but may increase shared VRAM/RAM usage on Windows."
                                 )
                             with gr.Row():
                                 lm_blocks_to_swap = gr.Slider(
-                                    label="LM Main Blocks To Swap",
+                                    label="LLM Main Blocks To Swap",
                                     minimum=0,
                                     maximum=64,
                                     value=1,
                                     step=1,
-                                    info="Number of main LM decoder blocks to swap. Higher lowers VRAM but can slow token generation. Value is clamped to model limit."
+                                    info="Number of main LLM decoder blocks to swap. Higher lowers VRAM but can slow token generation. Value is clamped to model limit."
                                 )
                                 lm_sub_blocks_to_swap = gr.Slider(
-                                    label="LM Sub Blocks To Swap",
+                                    label="LLM Sub Blocks To Swap",
                                     minimum=0,
                                     maximum=64,
                                     value=0,
                                     step=1,
-                                    info="Number of sub LM decoder blocks to swap. Leaving this at 0 avoids a large throughput penalty for modest VRAM savings."
+                                    info="Number of sub LLM decoder blocks to swap. Leaving this at 0 avoids a large throughput penalty for modest VRAM savings."
                                 )
                     
                     struct = gr.JSON(

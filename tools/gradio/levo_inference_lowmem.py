@@ -649,7 +649,7 @@ def _stage_generate_tokens(payload: Dict[str, Any]) -> Dict[str, Any]:
         WORKER_STAGE_LM,
         "Generating",
         0.05,
-        "Loading language model architecture...",
+        "Loading LLM architecture...",
     )
     with suppress_output():
         audiolm = builders.get_lm_model(cfg, version=version)
@@ -658,7 +658,7 @@ def _stage_generate_tokens(payload: Dict[str, Any]) -> Dict[str, Any]:
         WORKER_STAGE_LM,
         "Generating",
         0.15,
-        "Loading LM checkpoint...",
+        "Loading LLM checkpoint...",
     )
     with suppress_output():
         checkpoint = load_torch_file(pt_path, map_location="cpu")
@@ -675,23 +675,15 @@ def _stage_generate_tokens(payload: Dict[str, Any]) -> Dict[str, Any]:
                 WORKER_STAGE_LM,
                 "Generating",
                 0.22,
-                "LM MLP int8 is enabled; disabling LM block swap for compatibility.",
+                "LLM MLP int8 is enabled; disabling LLM block swap for compatibility.",
             )
             enable_lm_block_swap = False
-        if not disable_offload:
-            _emit_stage_progress(
-                progress_path,
-                WORKER_STAGE_LM,
-                "Generating",
-                0.24,
-                "LM MLP int8 is enabled; disabling LM offload profile for compatibility.",
-            )
         _emit_stage_progress(
             progress_path,
             WORKER_STAGE_LM,
             "Generating",
             0.26,
-            "Applying LM MLP-only int8 quantization...",
+            "Applying LLM MLP-only int8 quantization...",
         )
         with suppress_output():
             converted_layers = _apply_lm_mlp_int8_quantization(audiolm)
@@ -700,12 +692,12 @@ def _stage_generate_tokens(payload: Dict[str, Any]) -> Dict[str, Any]:
             WORKER_STAGE_LM,
             "Generating",
             0.27,
-            f"Applied LM MLP-only int8 quantization to {converted_layers} layers.",
+            f"Applied LLM MLP-only int8 quantization to {converted_layers} layers.",
         )
 
     offload_audiolm = (
         False
-        if (disable_offload or enable_lm_block_swap or enable_lm_mlp_int8)
+        if (disable_offload or enable_lm_block_swap)
         else (True if "offload" in cfg.keys() and "audiolm" in cfg.offload else False)
     )
     offload_profiler = None
@@ -717,7 +709,7 @@ def _stage_generate_tokens(payload: Dict[str, Any]) -> Dict[str, Any]:
             WORKER_STAGE_LM,
             "Generating",
             0.28,
-            "Applying LM offload profile...",
+            "Applying LLM offload profile...",
         )
         with suppress_output():
             audiolm_offload_param = OffloadParamParse.parse_config(audiolm, cfg.offload.audiolm)
@@ -774,15 +766,15 @@ def _stage_generate_tokens(payload: Dict[str, Any]) -> Dict[str, Any]:
                 WORKER_STAGE_LM,
                 "Generating",
                 0.28,
-                f"Moving LM to GPU with block swap (main={main_swap}, sub={sub_swap}, pinned={lm_block_swap_use_pinned})...",
+                f"Moving LLM to GPU with block swap (main={main_swap}, sub={sub_swap}, pinned={lm_block_swap_use_pinned})...",
             )
             audiolm = audiolm.to(lm_dtype)
             audiolm.move_to_device_except_swap_blocks(lm_device)
             audiolm.prepare_block_swap_before_forward()
         else:
-            move_message = "Moving LM to GPU..."
+            move_message = "Moving LLM to GPU..."
             if enable_lm_mlp_int8:
-                move_message = "Moving LM to GPU with MLP-only int8 quantization..."
+                move_message = "Moving LLM to GPU with MLP-only int8 quantization..."
             _emit_stage_progress(
                 progress_path,
                 WORKER_STAGE_LM,
