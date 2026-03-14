@@ -671,8 +671,8 @@ def _stage_generate_tokens(payload: Dict[str, Any]) -> Dict[str, Any]:
             try:
                 max_main_swap = max(0, int(len(audiolm.transformer.model.layers)) - 1)
                 max_sub_swap = max(0, int(len(audiolm.transformer2.model.layers)) - 1)
-                default_main_swap = min(4, max_main_swap) if max_main_swap > 0 else 0
-                default_sub_swap = min(4, max_sub_swap) if max_sub_swap > 0 else 0
+                default_main_swap = min(1, max_main_swap) if max_main_swap > 0 else 0
+                default_sub_swap = 0 if max_sub_swap > 0 else 0
 
                 try:
                     main_swap_value = int(lm_blocks_to_swap) if lm_blocks_to_swap is not None else default_main_swap
@@ -1113,7 +1113,7 @@ class LeVoInference(torch.nn.Module):
         enable_lm_block_swap=False,
         lm_blocks_to_swap=None,
         lm_sub_blocks_to_swap=None,
-        lm_block_swap_use_pinned=False,
+        lm_block_swap_use_pinned=True,
         progress_callback=None,
         cancellation_token=None,
     ):

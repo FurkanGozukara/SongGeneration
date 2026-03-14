@@ -1758,15 +1758,15 @@ with gr.Blocks(title="SECourses LeVo Song Generation App",theme=gr.themes.Soft()
                                 )
                                 lm_block_swap_use_pinned = gr.Checkbox(
                                     label="Use Pinned Memory For LM Swap",
-                                    value=False,
-                                    info="Can improve swap throughput but may increase shared VRAM/RAM usage on Windows."
+                                    value=True,
+                                    info="Recommended for block swap. Can improve swap throughput but may increase shared VRAM/RAM usage on Windows."
                                 )
                             with gr.Row():
                                 lm_blocks_to_swap = gr.Slider(
                                     label="LM Main Blocks To Swap",
                                     minimum=0,
                                     maximum=64,
-                                    value=4,
+                                    value=1,
                                     step=1,
                                     info="Number of main LM decoder blocks to swap. Higher lowers VRAM but can slow token generation. Value is clamped to model limit."
                                 )
@@ -1774,9 +1774,9 @@ with gr.Blocks(title="SECourses LeVo Song Generation App",theme=gr.themes.Soft()
                                     label="LM Sub Blocks To Swap",
                                     minimum=0,
                                     maximum=64,
-                                    value=4,
+                                    value=0,
                                     step=1,
-                                    info="Number of sub LM decoder blocks to swap. Value is clamped to model limit."
+                                    info="Number of sub LM decoder blocks to swap. Leaving this at 0 avoids a large throughput penalty for modest VRAM savings."
                                 )
                     
                     struct = gr.JSON(
@@ -2593,9 +2593,9 @@ with gr.Blocks(title="SECourses LeVo Song Generation App",theme=gr.themes.Soft()
             'disable_fp16': False,
             'disable_sequential': False,
             'enable_lm_block_swap': False,
-            'lm_blocks_to_swap': 4,
-            'lm_sub_blocks_to_swap': 4,
-            'lm_block_swap_use_pinned': False,
+            'lm_blocks_to_swap': 1,
+            'lm_sub_blocks_to_swap': 0,
+            'lm_block_swap_use_pinned': True,
             'auto_prompt_enabled': False,
             'auto_prompt_type': 'Auto'
         }

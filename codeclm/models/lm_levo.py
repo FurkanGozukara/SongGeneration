@@ -159,7 +159,9 @@ class LmModel(StreamingModule):
             device = first_param.device
 
         if transformer2_blocks_to_swap is None:
-            transformer2_blocks_to_swap = max(1, int(transformer_blocks_to_swap) // 2) if transformer_blocks_to_swap > 1 else 0
+            # The secondary stack has the same per-layer linear weight size but far fewer
+            # layers, so swapping it is usually a poor throughput tradeoff for inference.
+            transformer2_blocks_to_swap = 0
 
         main_enabled = self.transformer.model.enable_block_swap(
             blocks_to_swap=int(transformer_blocks_to_swap),
