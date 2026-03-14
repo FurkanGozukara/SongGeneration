@@ -607,6 +607,10 @@ def _stage_generate_tokens(payload: Dict[str, Any]) -> Dict[str, Any]:
     disable_cache_clear = bool(payload.get("disable_cache_clear", False))
     disable_fp16 = bool(payload.get("disable_fp16", False))
     disable_sequential = bool(payload.get("disable_sequential", False))
+    enable_lm_block_swap = bool(payload.get("enable_lm_block_swap", True))
+    lm_block_swap_use_pinned = bool(payload.get("lm_block_swap_use_pinned", False))
+    lm_blocks_to_swap = payload.get("lm_blocks_to_swap")
+    lm_sub_blocks_to_swap = payload.get("lm_sub_blocks_to_swap")
 
     _emit_stage_progress(
         progress_path,
@@ -632,8 +636,10 @@ def _stage_generate_tokens(payload: Dict[str, Any]) -> Dict[str, Any]:
         audiolm.load_state_dict(audiolm_state_dict, strict=False)
         audiolm = audiolm.eval()
 
-    offload_audiolm = False if disable_offload else (
-        True if "offload" in cfg.keys() and "audiolm" in cfg.offload else False
+    offload_audiolm = (
+        False
+        if (disable_offload or enable_lm_block_swap)
+        else (True if "offload" in cfg.keys() and "audiolm" in cfg.offload else False)
     )
     offload_profiler = None
     audiolm_offload_param = None
@@ -656,15 +662,65 @@ def _stage_generate_tokens(payload: Dict[str, Any]) -> Dict[str, Any]:
             offload_profiler.offload_layer(**(audiolm_offload_param.offload_layer_param_dict()))
             offload_profiler.clean_cache_wrapper(**(audiolm_offload_param.clean_cache_param_dict()))
     else:
-        _emit_stage_progress(
-            progress_path,
-            WORKER_STAGE_LM,
-            "Generating",
-            0.28,
-            "Moving LM to GPU...",
-        )
         lm_dtype = torch.float32 if disable_fp16 else torch.float16
-        audiolm = audiolm.cuda().to(lm_dtype)
+        lm_device = torch.device("cuda:0")
+        block_swap_enabled = False
+        block_swap_info = {}
+
+        if enable_lm_block_swap and hasattr(audiolm, "enable_block_swap"):
+            try:
+                max_main_swap = max(0, int(len(audiolm.transformer.model.layers)) - 1)
+                max_sub_swap = max(0, int(len(audiolm.transformer2.model.layers)) - 1)
+                default_main_swap = max(1, max_main_swap // 2) if max_main_swap > 0 else 0
+                default_sub_swap = max(1, max_sub_swap // 2) if max_sub_swap > 0 else 0
+
+                try:
+                    main_swap_value = int(lm_blocks_to_swap) if lm_blocks_to_swap is not None else default_main_swap
+                except (TypeError, ValueError):
+                    main_swap_value = default_main_swap
+                try:
+                    sub_swap_value = int(lm_sub_blocks_to_swap) if lm_sub_blocks_to_swap is not None else default_sub_swap
+                except (TypeError, ValueError):
+                    sub_swap_value = default_sub_swap
+
+                if main_swap_value < 0:
+                    main_swap_value = default_main_swap
+                if sub_swap_value < 0:
+                    sub_swap_value = default_sub_swap
+
+                block_swap_info = audiolm.enable_block_swap(
+                    transformer_blocks_to_swap=main_swap_value,
+                    transformer2_blocks_to_swap=sub_swap_value,
+                    device=lm_device,
+                    use_pinned_memory=lm_block_swap_use_pinned,
+                )
+                block_swap_enabled = bool(block_swap_info.get("enabled", False))
+            except Exception:
+                block_swap_enabled = False
+                block_swap_info = {}
+
+        if block_swap_enabled and hasattr(audiolm, "move_to_device_except_swap_blocks"):
+            main_swap = int(block_swap_info.get("transformer_blocks_to_swap", 0))
+            sub_swap = int(block_swap_info.get("transformer2_blocks_to_swap", 0))
+            _emit_stage_progress(
+                progress_path,
+                WORKER_STAGE_LM,
+                "Generating",
+                0.28,
+                f"Moving LM to GPU with block swap (main={main_swap}, sub={sub_swap}, pinned={lm_block_swap_use_pinned})...",
+            )
+            audiolm = audiolm.to(lm_dtype)
+            audiolm.move_to_device_except_swap_blocks(lm_device)
+            audiolm.prepare_block_swap_before_forward()
+        else:
+            _emit_stage_progress(
+                progress_path,
+                WORKER_STAGE_LM,
+                "Generating",
+                0.28,
+                "Moving LM to GPU...",
+            )
+            audiolm = audiolm.cuda().to(lm_dtype)
 
     _emit_stage_progress(
         progress_path,
@@ -1054,6 +1110,10 @@ class LeVoInference(torch.nn.Module):
         disable_cache_clear=False,
         disable_fp16=False,
         disable_sequential=False,
+        enable_lm_block_swap=True,
+        lm_blocks_to_swap=None,
+        lm_sub_blocks_to_swap=None,
+        lm_block_swap_use_pinned=False,
         progress_callback=None,
         cancellation_token=None,
     ):
@@ -1118,6 +1178,10 @@ class LeVoInference(torch.nn.Module):
                 "disable_cache_clear": bool(disable_cache_clear),
                 "disable_fp16": bool(disable_fp16),
                 "disable_sequential": bool(disable_sequential),
+                "enable_lm_block_swap": bool(enable_lm_block_swap),
+                "lm_blocks_to_swap": lm_blocks_to_swap,
+                "lm_sub_blocks_to_swap": lm_sub_blocks_to_swap,
+                "lm_block_swap_use_pinned": bool(lm_block_swap_use_pinned),
                 "progress_path": progress_path,
             }
             lm_result = _run_stage_subprocess(

@@ -144,6 +144,72 @@ class LmModel(StreamingModule):
         self.__dict__['_fsdp'] = None
 
         self.reset_streaming()
+        self._block_swap_enabled = False
+        self._block_swap_config: tp.Dict[str, int] = {}
+
+    def enable_block_swap(
+        self,
+        transformer_blocks_to_swap: int,
+        transformer2_blocks_to_swap: tp.Optional[int] = None,
+        device: tp.Optional[torch.device] = None,
+        use_pinned_memory: bool = False,
+    ) -> tp.Dict[str, tp.Any]:
+        if device is None:
+            first_param = next(iter(self.parameters()))
+            device = first_param.device
+
+        if transformer2_blocks_to_swap is None:
+            transformer2_blocks_to_swap = max(1, int(transformer_blocks_to_swap) // 2) if transformer_blocks_to_swap > 1 else 0
+
+        main_enabled = self.transformer.model.enable_block_swap(
+            blocks_to_swap=int(transformer_blocks_to_swap),
+            device=device,
+            supports_backward=False,
+            use_pinned_memory=use_pinned_memory,
+        )
+        sub_enabled = self.transformer2.model.enable_block_swap(
+            blocks_to_swap=int(transformer2_blocks_to_swap),
+            device=device,
+            supports_backward=False,
+            use_pinned_memory=use_pinned_memory,
+        )
+
+        self._block_swap_enabled = bool(main_enabled or sub_enabled)
+        self._block_swap_config = {
+            "transformer_blocks_to_swap": int(self.transformer.model.blocks_to_swap),
+            "transformer2_blocks_to_swap": int(self.transformer2.model.blocks_to_swap),
+        }
+        return {
+            "enabled": self._block_swap_enabled,
+            **self._block_swap_config,
+        }
+
+    def move_to_device_except_swap_blocks(self, device: torch.device):
+        if not self._block_swap_enabled:
+            self.to(device)
+            return
+
+        saved_layers_main = None
+        saved_layers_sub = None
+        if self.transformer.model.blocks_to_swap:
+            saved_layers_main = self.transformer.model.layers
+            self.transformer.model.layers = None
+        if self.transformer2.model.blocks_to_swap:
+            saved_layers_sub = self.transformer2.model.layers
+            self.transformer2.model.layers = None
+
+        self.to(device)
+
+        if saved_layers_main is not None:
+            self.transformer.model.layers = saved_layers_main
+        if saved_layers_sub is not None:
+            self.transformer2.model.layers = saved_layers_sub
+
+    def prepare_block_swap_before_forward(self):
+        if not self._block_swap_enabled:
+            return
+        self.transformer.model.prepare_block_swap_before_forward()
+        self.transformer2.model.prepare_block_swap_before_forward()
         
     def _init_weights(self, weight_init: tp.Optional[str], 
                       depthwise_init: tp.Optional[str], zero_bias_init: bool):

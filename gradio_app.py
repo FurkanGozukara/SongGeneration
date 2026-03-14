@@ -578,7 +578,8 @@ def collect_current_parameters(
     duration_seconds, max_gen_length, diffusion_steps, temperature, top_k, top_p,
     cfg_coef, guidance_scale, use_sampling, extend_stride,
     gen_type, chunked, chunk_size, record_tokens, record_window,
-    disable_offload, disable_cache_clear, disable_fp16, disable_sequential,
+    disable_offload, disable_cache_clear, disable_fp16, disable_sequential, enable_lm_block_swap,
+    lm_blocks_to_swap, lm_sub_blocks_to_swap, lm_block_swap_use_pinned,
     num_generations, loop_presets, randomize_params
 ):
     """Collect all current parameters into a dictionary"""
@@ -616,6 +617,10 @@ def collect_current_parameters(
         'disable_cache_clear': disable_cache_clear,
         'disable_fp16': disable_fp16,
         'disable_sequential': disable_sequential,
+        'enable_lm_block_swap': enable_lm_block_swap,
+        'lm_blocks_to_swap': lm_blocks_to_swap,
+        'lm_sub_blocks_to_swap': lm_sub_blocks_to_swap,
+        'lm_block_swap_use_pinned': lm_block_swap_use_pinned,
         'num_generations': num_generations,
         'loop_presets': loop_presets,
         'randomize_params': randomize_params
@@ -734,7 +739,8 @@ def run_batch_processing(
     duration_seconds, max_gen_length, diffusion_steps, temperature, top_k, top_p,
     cfg_coef, guidance_scale, use_sampling, extend_stride,
     gen_type, chunked, chunk_size, record_tokens, record_window,
-    disable_offload, disable_cache_clear, disable_fp16, disable_sequential,
+    disable_offload, disable_cache_clear, disable_fp16, disable_sequential, enable_lm_block_swap,
+    lm_blocks_to_swap, lm_sub_blocks_to_swap, lm_block_swap_use_pinned,
     randomize_params, auto_prompt_enabled, auto_prompt_type, progress=gr.Progress()
 ):
     """Run batch processing with progress tracking"""
@@ -761,7 +767,8 @@ def run_batch_processing(
         duration_seconds, max_gen_length, diffusion_steps, temperature, top_k, top_p,
         cfg_coef, guidance_scale, use_sampling, extend_stride,
         gen_type, chunked, chunk_size, record_tokens, record_window,
-        disable_offload, disable_cache_clear, disable_fp16, disable_sequential,
+        disable_offload, disable_cache_clear, disable_fp16, disable_sequential, enable_lm_block_swap,
+        lm_blocks_to_swap, lm_sub_blocks_to_swap, lm_block_swap_use_pinned,
         num_generations, loop_presets, randomize_params
     )
     
@@ -855,7 +862,7 @@ def validate_audio_file(audio_path, use_separation=False):
         # Get file extension
         file_ext = os.path.splitext(audio_path)[1].lower()
         video_extensions = ['.mp4', '.avi', '.mov', '.mkv', '.webm', '.flv', '.wmv', '.m4v']
-        audio_extensions = ['.wav', '.mp3', '.flac', '.m4a', '.aac', '.ogg', '.wma']
+        audio_extensions = ['.wav', '.mp3', '.flac', '.m4a', '.aac', '.ogg', '.opus', '.wma']
         
         # If it's a video file, extract audio
         if file_ext in video_extensions:
@@ -955,7 +962,8 @@ def submit_lyrics(
     duration_seconds, max_gen_length, diffusion_steps, temperature, top_k, top_p,
     cfg_coef, guidance_scale, use_sampling, extend_stride,
     gen_type, chunked, chunk_size, record_tokens, record_window,
-    disable_offload, disable_cache_clear, disable_fp16, disable_sequential,
+    disable_offload, disable_cache_clear, disable_fp16, disable_sequential, enable_lm_block_swap,
+    lm_blocks_to_swap, lm_sub_blocks_to_swap, lm_block_swap_use_pinned,
     num_generations, loop_presets, randomize_params, 
     auto_prompt_enabled, auto_prompt_type,  # New parameters
     history, session, progress=gr.Progress()
@@ -1161,6 +1169,10 @@ def submit_lyrics(
                     disable_cache_clear=disable_cache_clear,
                     disable_fp16=disable_fp16,
                     disable_sequential=disable_sequential,
+                    enable_lm_block_swap=enable_lm_block_swap,
+                    lm_blocks_to_swap=lm_blocks_to_swap,
+                    lm_sub_blocks_to_swap=lm_sub_blocks_to_swap,
+                    lm_block_swap_use_pinned=lm_block_swap_use_pinned,
                     progress_callback=progress_callback,
                     cancellation_token=cancellation_token
                 )
@@ -1367,6 +1379,10 @@ def submit_lyrics(
                             disable_cache_clear=disable_cache_clear,
                             disable_fp16=disable_fp16,
                             disable_sequential=disable_sequential,
+                            enable_lm_block_swap=enable_lm_block_swap,
+                            lm_blocks_to_swap=lm_blocks_to_swap,
+                            lm_sub_blocks_to_swap=lm_sub_blocks_to_swap,
+                            lm_block_swap_use_pinned=lm_block_swap_use_pinned,
                             progress_callback=progress_callback,
                             cancellation_token=cancellation_token
                         )
@@ -1406,6 +1422,10 @@ def submit_lyrics(
                             disable_cache_clear=disable_cache_clear,
                             disable_fp16=disable_fp16,
                             disable_sequential=disable_sequential,
+                            enable_lm_block_swap=enable_lm_block_swap,
+                            lm_blocks_to_swap=lm_blocks_to_swap,
+                            lm_sub_blocks_to_swap=lm_sub_blocks_to_swap,
+                            lm_block_swap_use_pinned=lm_block_swap_use_pinned,
                             progress_callback=progress_callback,
                             cancellation_token=cancellation_token
                         )
@@ -1426,6 +1446,10 @@ def submit_lyrics(
                             disable_cache_clear=disable_cache_clear,
                             disable_fp16=disable_fp16,
                             disable_sequential=disable_sequential,
+                            enable_lm_block_swap=enable_lm_block_swap,
+                            lm_blocks_to_swap=lm_blocks_to_swap,
+                            lm_sub_blocks_to_swap=lm_sub_blocks_to_swap,
+                            lm_block_swap_use_pinned=lm_block_swap_use_pinned,
                             progress_callback=progress_callback,
                             cancellation_token=cancellation_token
                         )
@@ -1568,7 +1592,8 @@ def submit_lyrics(
                     duration_from_steps, max_gen_length, diffusion_steps, temperature, top_k, top_p,
                     cfg_coef, guidance_scale, use_sampling, extend_stride,
                     gen_type, chunked, chunk_size, record_tokens, record_window,
-                    disable_offload, disable_cache_clear, disable_fp16, disable_sequential,
+                    disable_offload, disable_cache_clear, disable_fp16, disable_sequential, enable_lm_block_swap,
+                    lm_blocks_to_swap, lm_sub_blocks_to_swap, lm_block_swap_use_pinned,
                     num_generations, loop_presets, randomize_params
                 )
                 metadata['timestamp'] = current_time
@@ -1725,6 +1750,34 @@ with gr.Blocks(title="SECourses LeVo Song Generation App",theme=gr.themes.Soft()
                                 step=1,
                                 info=format_duration_slider_info(DEFAULT_MAX_GENERATION_STEPS)
                             )
+                            with gr.Row():
+                                enable_lm_block_swap = gr.Checkbox(
+                                    label="Enable LM Block Swap",
+                                    value=False,
+                                    info="Swap LM transformer blocks between CPU and GPU during token generation to reduce peak VRAM."
+                                )
+                                lm_block_swap_use_pinned = gr.Checkbox(
+                                    label="Use Pinned Memory For LM Swap",
+                                    value=False,
+                                    info="Can improve swap throughput but may increase shared VRAM/RAM usage on Windows."
+                                )
+                            with gr.Row():
+                                lm_blocks_to_swap = gr.Slider(
+                                    label="LM Main Blocks To Swap",
+                                    minimum=0,
+                                    maximum=64,
+                                    value=17,
+                                    step=1,
+                                    info="Number of main LM decoder blocks to swap. Higher lowers VRAM but can slow token generation. Value is clamped to model limit."
+                                )
+                                lm_sub_blocks_to_swap = gr.Slider(
+                                    label="LM Sub Blocks To Swap",
+                                    minimum=0,
+                                    maximum=64,
+                                    value=5,
+                                    step=1,
+                                    info="Number of sub LM decoder blocks to swap. Value is clamped to model limit."
+                                )
                     
                     struct = gr.JSON(
                         label="Song Structure (Optional - for display only)",
@@ -1879,47 +1932,12 @@ with gr.Blocks(title="SECourses LeVo Song Generation App",theme=gr.themes.Soft()
                     info="Generate multiple songs with different seeds. Large model can create 999 unique 4m30s songs in one batch!"
                         )
                     
-                    # Auto Prompt Audio Selection
-                    with gr.Accordion("Auto Prompt Audio Selection", open=True):
-                        with gr.Row():
-                            auto_prompt_enabled = gr.Checkbox(
-                                label="Use Auto Prompt Audio",
-                                value=False,
-                                interactive=False,
-                                info="Disabled. Upload reference audio/video to guide style."
-                            )
-                            # Get available types and ensure "Auto" is always included
-                            available_types = auto_prompt_manager.get_available_types() if auto_prompt_manager.is_available() else []
-                            if available_types and "Auto" not in available_types:
-                                available_types = available_types + ["Auto"]
-                            dropdown_choices = available_types if available_types else AUTO_PROMPT_TYPES
-                            
-                            auto_prompt_type = gr.Dropdown(
-                                label="Auto Prompt Type",
-                                choices=dropdown_choices,
-                                value="Auto",
-                                visible=False,
-                                interactive=False,
-                                info="Select musical style for automatic reference audio"
-                            )
-                        
-                        auto_prompt_status = gr.Markdown("", visible=False)
-                        
-                        def toggle_auto_prompt(enabled):
-                            return gr.update(visible=enabled), gr.update(visible=enabled if enabled else False)
-                        
-                        auto_prompt_enabled.change(
-                            fn=toggle_auto_prompt,
-                            inputs=[auto_prompt_enabled],
-                            outputs=[auto_prompt_type, auto_prompt_status]
-                        )
-                    
                 with gr.Column(scale=1):
                     output_audio = gr.Audio(label="Generated Audio", type="filepath")
                     output_video = gr.Video(label="Generated Video", visible=True)
                     
                     gr.Markdown("---")
-                    gr.Markdown("### LeVo Models\n**SongGeneration v2 Large** (***** Best)\nSupports up to 4m30s songs - multilingual")
+                    gr.Markdown("### LeVo Models\n**SongGeneration v2 Large - Supports up to 4m30s songs - multilingual**")
                     
                     # Reference audio section (moved above image upload)
                     with gr.Accordion("Reference Audio/Video (Advanced) - Maximum 10 seconds utilized", open=True):
@@ -1929,6 +1947,7 @@ with gr.Blocks(title="SECourses LeVo Song Generation App",theme=gr.themes.Soft()
                                 file_types=[".mp3", ".wav", ".flac", ".m4a", ".aac", ".ogg", ".opus", ".wma",
                                            ".mp4", ".avi", ".mov", ".mkv", ".webm", ".flv", ".wmv", ".m4v"],
                                 file_count="single",
+                                type="filepath",
                                 visible=True
                             )
                             audio_component = gr.Audio(
@@ -1938,6 +1957,29 @@ with gr.Blocks(title="SECourses LeVo Song Generation App",theme=gr.themes.Soft()
                             )
                         audio_path = gr.Textbox(visible=False)
                         upload_status = gr.Markdown("", visible=False)
+
+                        with gr.Accordion("Auto Prompt Audio Selection", open=True):
+                            with gr.Row():
+                                auto_prompt_enabled = gr.Checkbox(
+                                    label="Use Auto Prompt Audio",
+                                    value=False,
+                                    interactive=False,
+                                    info="Upload reference audio/video to automatically enable style guidance."
+                                )
+                                # Keep type list available for preset compatibility (hidden while auto prompt checkpoints are disabled)
+                                available_types = auto_prompt_manager.get_available_types() if auto_prompt_manager.is_available() else []
+                                if available_types and "Auto" not in available_types:
+                                    available_types = available_types + ["Auto"]
+                                dropdown_choices = available_types if available_types else AUTO_PROMPT_TYPES
+                                auto_prompt_type = gr.Dropdown(
+                                    label="Auto Prompt Type",
+                                    choices=dropdown_choices,
+                                    value="Auto",
+                                    visible=False,
+                                    interactive=False,
+                                    info="Select musical style for automatic reference audio"
+                                )
+                            auto_prompt_status = gr.Markdown("", visible=False)
                         
                         with gr.Accordion("Info Reference Tips", open=False):
                             gr.Markdown("""
@@ -1945,7 +1987,7 @@ with gr.Blocks(title="SECourses LeVo Song Generation App",theme=gr.themes.Soft()
                             - Upload a clean vocal snippet or video clip featuring the target voice
                             - Only the first 10 seconds are used, so trim to the strongest phrase
                             - Keep background noise and heavy effects to a minimum
-                            - Supported audio: WAV, MP3, FLAC, M4A, AAC, OGG, WMA
+                            - Supported audio: WAV, MP3, FLAC, M4A, AAC, OGG, OPUS, WMA
                             - Supported video: MP4, AVI, MOV, MKV, WebM, FLV, WMV, M4V
                             - Maximum file size: 100MB
                             """)
@@ -2434,8 +2476,8 @@ with gr.Blocks(title="SECourses LeVo Song Generation App",theme=gr.themes.Soft()
         param_values = list(args)
         
         # Safety check for parameter count (updated for new parameters)
-        if len(param_values) != 38:  # Updated count including duration slider and auto prompt parameters
-            error_msg = f"Invalid parameter count: expected 38, got {len(param_values)}"
+        if len(param_values) != 42:  # Updated count including LM swap controls and auto prompt parameters
+            error_msg = f"Invalid parameter count: expected 42, got {len(param_values)}"
             print(f"[ERROR] {error_msg}")
             gr.Error(error_msg)
             return gr.Dropdown(choices=preset_manager.get_preset_list())
@@ -2478,8 +2520,12 @@ with gr.Blocks(title="SECourses LeVo Song Generation App",theme=gr.themes.Soft()
             'disable_cache_clear': param_values[33],
             'disable_fp16': param_values[34],
             'disable_sequential': param_values[35],
-            'auto_prompt_enabled': param_values[36],
-            'auto_prompt_type': param_values[37]
+            'enable_lm_block_swap': param_values[36],
+            'lm_blocks_to_swap': param_values[37],
+            'lm_sub_blocks_to_swap': param_values[38],
+            'lm_block_swap_use_pinned': param_values[39],
+            'auto_prompt_enabled': param_values[40],
+            'auto_prompt_type': param_values[41]
         }
         # Save preset
         
@@ -2498,13 +2544,13 @@ with gr.Blocks(title="SECourses LeVo Song Generation App",theme=gr.themes.Soft()
     def handle_load_preset(preset_name, current_lyrics):
         """Load a preset and update all UI components"""
         if not preset_name:
-            return [gr.update()] * 38  # Updated to 38 for all parameters (including new ones)
+            return [gr.update()] * 42  # Updated to 42 for all parameters (including new ones)
         
         preset_data, message = preset_manager.load_preset(preset_name)
         if preset_data is None:
             print(f"[ERROR] {message}")
             gr.Error(message)
-            return [gr.update()] * 38
+            return [gr.update()] * 42
         
         # Load preset values
         
@@ -2546,6 +2592,10 @@ with gr.Blocks(title="SECourses LeVo Song Generation App",theme=gr.themes.Soft()
             'disable_cache_clear': False,
             'disable_fp16': False,
             'disable_sequential': False,
+            'enable_lm_block_swap': False,
+            'lm_blocks_to_swap': 17,
+            'lm_sub_blocks_to_swap': 5,
+            'lm_block_swap_use_pinned': False,
             'auto_prompt_enabled': False,
             'auto_prompt_type': 'Auto'
         }
@@ -2564,7 +2614,26 @@ with gr.Blocks(title="SECourses LeVo Song Generation App",theme=gr.themes.Soft()
         values['include_dropdown_attributes'] = bool(
             values.get('include_dropdown_attributes', defaults['include_dropdown_attributes'])
         )
+        values['enable_lm_block_swap'] = bool(
+            values.get('enable_lm_block_swap', defaults['enable_lm_block_swap'])
+        )
+        values['lm_block_swap_use_pinned'] = bool(
+            values.get('lm_block_swap_use_pinned', defaults['lm_block_swap_use_pinned'])
+        )
+        try:
+            values['lm_blocks_to_swap'] = int(values.get('lm_blocks_to_swap', defaults['lm_blocks_to_swap']))
+        except (TypeError, ValueError):
+            values['lm_blocks_to_swap'] = defaults['lm_blocks_to_swap']
+        values['lm_blocks_to_swap'] = max(0, min(values['lm_blocks_to_swap'], 64))
+        try:
+            values['lm_sub_blocks_to_swap'] = int(values.get('lm_sub_blocks_to_swap', defaults['lm_sub_blocks_to_swap']))
+        except (TypeError, ValueError):
+            values['lm_sub_blocks_to_swap'] = defaults['lm_sub_blocks_to_swap']
+        values['lm_sub_blocks_to_swap'] = max(0, min(values['lm_sub_blocks_to_swap'], 64))
         values = sanitize_preset_dropdown_values(values)
+        normalized_preset_audio_path = normalize_uploaded_path(values.get('audio_path'))
+        values['audio_path'] = normalized_preset_audio_path if normalized_preset_audio_path else None
+        values['auto_prompt_enabled'] = bool(normalized_preset_audio_path)
 
         # Get current model's max generation length and clamp preset value
         current_max_length = 6750  # Default to Large model capacity
@@ -2652,6 +2721,10 @@ with gr.Blocks(title="SECourses LeVo Song Generation App",theme=gr.themes.Soft()
             values['disable_cache_clear'],
             values['disable_fp16'],
             values['disable_sequential'],
+            values['enable_lm_block_swap'],
+            values['lm_blocks_to_swap'],
+            values['lm_sub_blocks_to_swap'],
+            values['lm_block_swap_use_pinned'],
             values['auto_prompt_enabled'],
             validated_auto_prompt_type  # Use validated value
         ]
@@ -2667,9 +2740,23 @@ with gr.Blocks(title="SECourses LeVo Song Generation App",theme=gr.themes.Soft()
         num_generations, loop_presets, randomize_params, duration_slider, max_gen_length, diffusion_steps, temperature, top_k, top_p,
         cfg_coef, guidance_scale, use_sampling, extend_stride,
         gen_type, chunked, chunk_size, record_tokens, record_window,
-        disable_offload, disable_cache_clear, disable_fp16, disable_sequential,
+        disable_offload, disable_cache_clear, disable_fp16, disable_sequential, enable_lm_block_swap,
+        lm_blocks_to_swap, lm_sub_blocks_to_swap, lm_block_swap_use_pinned,
         auto_prompt_enabled, auto_prompt_type  # New parameters
     ]
+
+    def toggle_lm_block_swap_controls(enabled):
+        return (
+            gr.update(interactive=enabled),
+            gr.update(interactive=enabled),
+            gr.update(interactive=enabled),
+        )
+
+    enable_lm_block_swap.change(
+        fn=toggle_lm_block_swap_controls,
+        inputs=[enable_lm_block_swap],
+        outputs=[lm_blocks_to_swap, lm_sub_blocks_to_swap, lm_block_swap_use_pinned],
+    )
     
     # Modified to return both dropdown and clear the input field
     def handle_save_and_clear(preset_name, current_preset, *args):
@@ -2707,15 +2794,68 @@ with gr.Blocks(title="SECourses LeVo Song Generation App",theme=gr.themes.Soft()
         outputs=all_inputs
     )
     
+    def normalize_uploaded_path(file_value):
+        """Normalize Gradio file/audio component payloads into a filesystem path string."""
+        if file_value is None:
+            return ""
+        if isinstance(file_value, os.PathLike):
+            return os.fspath(file_value)
+        if isinstance(file_value, str):
+            return file_value
+        if isinstance(file_value, dict):
+            for key in ("path", "name"):
+                candidate = normalize_uploaded_path(file_value.get(key))
+                if candidate:
+                    return candidate
+            return ""
+        if isinstance(file_value, (list, tuple)):
+            for item in file_value:
+                candidate = normalize_uploaded_path(item)
+                if candidate:
+                    return candidate
+            return ""
+        for attr in ("path", "name"):
+            if hasattr(file_value, attr):
+                candidate = normalize_uploaded_path(getattr(file_value, attr))
+                if candidate:
+                    return candidate
+        return ""
+
+    def get_reference_audio_updates(reference_path):
+        """Return UI updates for auto prompt controls based on uploaded reference availability."""
+        has_reference = bool(reference_path and str(reference_path).strip())
+        if has_reference:
+            return (
+                gr.update(
+                    value=True,
+                    info="Enabled. Uploaded reference audio/video will guide style."
+                ),
+                gr.update(
+                    visible=True,
+                    value="[OK] Reference audio/video conditioning is active."
+                )
+            )
+        return (
+            gr.update(
+                value=False,
+                info="Upload reference audio/video to automatically enable style guidance."
+            ),
+            gr.update(visible=False, value="")
+        )
+
     # Handle file upload and component switching
     def process_file_upload(file_path):
-        """Process uploaded file and determine component visibility"""
+        """Process uploaded file and determine component visibility."""
+        file_path = normalize_uploaded_path(file_path)
         if not file_path:
+            auto_prompt_update, auto_prompt_status_update = get_reference_audio_updates("")
             return (
                 gr.update(visible=True),   # file_upload
                 gr.update(visible=False),  # audio_component
                 "",                        # audio_path
-                gr.update(visible=False)   # upload_status
+                gr.update(visible=False),  # upload_status
+                auto_prompt_update,        # auto_prompt_enabled
+                auto_prompt_status_update  # auto_prompt_status
             )
         
         # Get file extension
@@ -2727,11 +2867,14 @@ with gr.Blocks(title="SECourses LeVo Song Generation App",theme=gr.themes.Soft()
         
         if file_ext in audio_extensions:
             # Audio file - show audio component with trim feature
+            auto_prompt_update, auto_prompt_status_update = get_reference_audio_updates(file_path)
             return (
                 gr.update(visible=False),   # file_upload
                 gr.update(visible=True, value=file_path),  # audio_component
                 file_path,                  # audio_path
-                gr.update(visible=True, value="[OK] Audio file loaded. You can use the trim feature above.")  # upload_status
+                gr.update(visible=True, value="[OK] Audio file loaded. You can use the trim feature above."),  # upload_status
+                auto_prompt_update,         # auto_prompt_enabled
+                auto_prompt_status_update   # auto_prompt_status
             )
         elif file_ext in video_extensions:
             # Video file - extract audio and show status
@@ -2739,39 +2882,53 @@ with gr.Blocks(title="SECourses LeVo Song Generation App",theme=gr.themes.Soft()
             extracted_path, error_msg = validate_audio_file(file_path)
             
             if error_msg:
+                auto_prompt_update, auto_prompt_status_update = get_reference_audio_updates("")
                 return (
                     gr.update(visible=True),   # file_upload
                     gr.update(visible=False),  # audio_component
                     "",                        # audio_path
-                    gr.update(visible=True, value=f"[ERROR] Error: {error_msg}")  # upload_status
+                    gr.update(visible=True, value=f"[ERROR] Error: {error_msg}"),  # upload_status
+                    auto_prompt_update,        # auto_prompt_enabled
+                    auto_prompt_status_update  # auto_prompt_status
                 )
             else:
                 # Show extracted audio in audio component
+                auto_prompt_update, auto_prompt_status_update = get_reference_audio_updates(extracted_path)
                 return (
                     gr.update(visible=False),   # file_upload
                     gr.update(visible=True, value=extracted_path),  # audio_component
                     extracted_path,             # audio_path
-                    gr.update(visible=True, value="[OK] Audio extracted from video. You can use the trim feature above.")  # upload_status
+                    gr.update(visible=True, value="[OK] Audio extracted from video. You can use the trim feature above."),  # upload_status
+                    auto_prompt_update,         # auto_prompt_enabled
+                    auto_prompt_status_update   # auto_prompt_status
                 )
         else:
+            auto_prompt_update, auto_prompt_status_update = get_reference_audio_updates("")
             return (
                 gr.update(visible=True),   # file_upload
                 gr.update(visible=False),  # audio_component
                 "",                        # audio_path
-                gr.update(visible=True, value="[ERROR] Unsupported file format")  # upload_status
+                gr.update(visible=True, value="[ERROR] Unsupported file format"),  # upload_status
+                auto_prompt_update,        # auto_prompt_enabled
+                auto_prompt_status_update  # auto_prompt_status
             )
     
     def update_audio_path(audio_value):
-        """Update the hidden audio path when audio component changes"""
-        return audio_value if audio_value else ""
+        """Update the hidden audio path and reference conditioning state after trimming/changes."""
+        normalized_audio_path = normalize_uploaded_path(audio_value)
+        auto_prompt_update, auto_prompt_status_update = get_reference_audio_updates(normalized_audio_path)
+        return normalized_audio_path, auto_prompt_update, auto_prompt_status_update
     
     def reset_upload():
-        """Reset the upload components"""
+        """Reset the upload components."""
+        auto_prompt_update, auto_prompt_status_update = get_reference_audio_updates("")
         return (
             gr.update(visible=True, value=None),   # file_upload
             gr.update(visible=False, value=None),  # audio_component
             "",                                    # audio_path
-            gr.update(visible=False)               # upload_status
+            gr.update(visible=False),              # upload_status
+            auto_prompt_update,                    # auto_prompt_enabled
+            auto_prompt_status_update              # auto_prompt_status
         )
     
     # Load last used preset on startup
@@ -2792,7 +2949,8 @@ with gr.Blocks(title="SECourses LeVo Song Generation App",theme=gr.themes.Soft()
             duration_slider, max_gen_length, diffusion_steps, temperature, top_k, top_p,
             cfg_coef, guidance_scale, use_sampling, extend_stride,
             gen_type, chunked, chunk_size, record_tokens, record_window,
-            disable_offload, disable_cache_clear, disable_fp16, disable_sequential,
+            disable_offload, disable_cache_clear, disable_fp16, disable_sequential, enable_lm_block_swap,
+            lm_blocks_to_swap, lm_sub_blocks_to_swap, lm_block_swap_use_pinned,
             num_generations, loop_presets, randomize_params,
             auto_prompt_enabled, auto_prompt_type,  # New parameters
             history, session
@@ -2811,21 +2969,21 @@ with gr.Blocks(title="SECourses LeVo Song Generation App",theme=gr.themes.Soft()
     file_upload.change(
         fn=process_file_upload,
         inputs=[file_upload],
-        outputs=[file_upload, audio_component, audio_path, upload_status]
+        outputs=[file_upload, audio_component, audio_path, upload_status, auto_prompt_enabled, auto_prompt_status]
     )
     
     # Update audio path when audio component changes (after trimming)
     audio_component.change(
         fn=update_audio_path,
         inputs=[audio_component],
-        outputs=[audio_path]
+        outputs=[audio_path, auto_prompt_enabled, auto_prompt_status]
     )
     
     # Add clear handler to audio component
     audio_component.clear(
         fn=reset_upload,
         inputs=[],
-        outputs=[file_upload, audio_component, audio_path, upload_status]
+        outputs=[file_upload, audio_component, audio_path, upload_status, auto_prompt_enabled, auto_prompt_status]
     )
     
     # Batch processing button handler
@@ -2838,7 +2996,8 @@ with gr.Blocks(title="SECourses LeVo Song Generation App",theme=gr.themes.Soft()
             duration_slider, max_gen_length, diffusion_steps, temperature, top_k, top_p,
             cfg_coef, guidance_scale, use_sampling, extend_stride,
             gen_type, chunked, chunk_size, record_tokens, record_window,
-            disable_offload, disable_cache_clear, disable_fp16, disable_sequential,
+            disable_offload, disable_cache_clear, disable_fp16, disable_sequential, enable_lm_block_swap,
+            lm_blocks_to_swap, lm_sub_blocks_to_swap, lm_block_swap_use_pinned,
             randomize_params, auto_prompt_enabled, auto_prompt_type  # Add new parameters
         ],
         outputs=[cancel_btn, progress_text, batch_status]

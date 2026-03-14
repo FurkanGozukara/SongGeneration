@@ -2,12 +2,23 @@
 from .llama.modeling_llama import LlamaConfig, CausalLMOutputWithPast, BaseModelOutputWithPast, LlamaDecoderLayer, LlamaRMSNorm
 from .llama.modeling_llama import LlamaForCausalLM as LlamaForCausalLM_base
 from .llama.modeling_llama import LlamaModel as LlamaModel_base
+import os
+import sys
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from typing import Union, Optional, Tuple, List
 from packaging import version
 import transformers
+
+_MUSUBI_SRC = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "musubi-tuner", "src"))
+if os.path.isdir(_MUSUBI_SRC) and _MUSUBI_SRC not in sys.path:
+    sys.path.append(_MUSUBI_SRC)
+
+try:
+    from musubi_tuner.modules.custom_offloading_utils import ModelOffloader
+except Exception:
+    ModelOffloader = None
 """
 Wrap the original Llama model for potential customized changes.
 """
@@ -107,6 +118,55 @@ class LmModel(LlamaModel_base):
         self.post_init()
         self.gradient_checkpointing_disable()
 
+        # Inference-only block swap support (CPU/GPU layer swapping).
+        self.blocks_to_swap = 0
+        self.num_blocks = len(self.layers)
+        self.offloader = None
+
+    def enable_block_swap(
+        self,
+        blocks_to_swap: int,
+        device: torch.device,
+        supports_backward: bool = False,
+        use_pinned_memory: bool = False,
+    ) -> bool:
+        self.num_blocks = len(self.layers)
+        max_swap_blocks = max(0, self.num_blocks - 1)
+        blocks_to_swap = int(max(0, min(int(blocks_to_swap), max_swap_blocks)))
+
+        self.blocks_to_swap = blocks_to_swap
+        self.offloader = None
+
+        if blocks_to_swap <= 0 or ModelOffloader is None:
+            return False
+
+        self.offloader = ModelOffloader(
+            "levo_llama_block",
+            self.layers,
+            self.num_blocks,
+            self.blocks_to_swap,
+            supports_backward,
+            device,
+            use_pinned_memory,
+        )
+        return True
+
+    def move_to_device_except_swap_blocks(self, device: torch.device):
+        # Assume model starts on CPU; avoid moving all swap blocks at once.
+        if self.blocks_to_swap and self.offloader is not None:
+            saved_layers = self.layers
+            self.layers = None
+            self.to(device)
+            self.layers = saved_layers
+            return
+        self.to(device)
+
+    def prepare_block_swap_before_forward(self):
+        if not self.blocks_to_swap or self.offloader is None:
+            return
+        self.offloader.set_forward_only(True)
+        self.offloader.prepare_block_devices_before_forward(self.layers)
+
     def forward(
         self,
         input_ids: torch.LongTensor = None,
@@ -178,6 +238,8 @@ class LmModel(LlamaModel_base):
                 all_hidden_states += (hidden_states,)
 
             past_key_value = past_key_values[idx] if past_key_values is not None else None
+            if self.blocks_to_swap and self.offloader is not None:
+                self.offloader.wait_for_block(idx)
 
             layer_args = (hidden_states, attention_mask, position_ids,)
 
@@ -206,6 +268,9 @@ class LmModel(LlamaModel_base):
 
             if output_attentions:
                 all_self_attns += (layer_outputs[1],)
+
+            if self.blocks_to_swap and self.offloader is not None:
+                self.offloader.submit_move_blocks_forward(self.layers, idx)
 
         hidden_states = self.norm(hidden_states)
 

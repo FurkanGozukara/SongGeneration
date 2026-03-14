@@ -439,6 +439,10 @@ def generate_single_song(model, params, progress_tracker=None, cancellation_toke
         disable_cache_clear=params.get('disable_cache_clear', False),
         disable_fp16=params.get('disable_fp16', False),
         disable_sequential=params.get('disable_sequential', False),
+        enable_lm_block_swap=params.get('enable_lm_block_swap', True),
+        lm_blocks_to_swap=params.get('lm_blocks_to_swap', 17),
+        lm_sub_blocks_to_swap=params.get('lm_sub_blocks_to_swap', 5),
+        lm_block_swap_use_pinned=params.get('lm_block_swap_use_pinned', False),
         progress_callback=internal_progress_callback,
         cancellation_token=cancellation_token
     )
@@ -471,6 +475,10 @@ def generate_single_song(model, params, progress_tracker=None, cancellation_toke
             disable_cache_clear=params.get('disable_cache_clear', False),
             disable_fp16=params.get('disable_fp16', False),
             disable_sequential=params.get('disable_sequential', False),
+            enable_lm_block_swap=params.get('enable_lm_block_swap', True),
+            lm_blocks_to_swap=params.get('lm_blocks_to_swap', 17),
+            lm_sub_blocks_to_swap=params.get('lm_sub_blocks_to_swap', 5),
+            lm_block_swap_use_pinned=params.get('lm_block_swap_use_pinned', False),
             progress_callback=internal_progress_callback,
             cancellation_token=cancellation_token
         )
@@ -492,6 +500,10 @@ def generate_single_song(model, params, progress_tracker=None, cancellation_toke
             disable_cache_clear=params.get('disable_cache_clear', False),
             disable_fp16=params.get('disable_fp16', False),
             disable_sequential=params.get('disable_sequential', False),
+            enable_lm_block_swap=params.get('enable_lm_block_swap', True),
+            lm_blocks_to_swap=params.get('lm_blocks_to_swap', 17),
+            lm_sub_blocks_to_swap=params.get('lm_sub_blocks_to_swap', 5),
+            lm_block_swap_use_pinned=params.get('lm_block_swap_use_pinned', False),
             progress_callback=internal_progress_callback,
             cancellation_token=cancellation_token
         )
