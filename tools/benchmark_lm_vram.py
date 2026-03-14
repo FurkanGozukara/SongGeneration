@@ -174,6 +174,7 @@ def main():
             disable_sequential=bool(preset.get("disable_sequential", False)),
             enable_lm_block_swap=bool(preset.get("enable_lm_block_swap", False)),
             enable_lm_mlp_int8=bool(preset.get("enable_lm_mlp_int8", False)),
+            enable_lm_mlp_int4=bool(preset.get("enable_lm_mlp_int4", False)),
             lm_blocks_to_swap=_safe_int(preset.get("lm_blocks_to_swap", 1), 1),
             lm_sub_blocks_to_swap=_safe_int(preset.get("lm_sub_blocks_to_swap", 0), 0),
             lm_block_swap_use_pinned=bool(preset.get("lm_block_swap_use_pinned", True)),

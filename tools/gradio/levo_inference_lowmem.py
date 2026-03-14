@@ -42,11 +42,15 @@ WORKER_STAGE_DIFFUSION = "diffusion"
 WORKER_STAGES = {WORKER_STAGE_PREPARE, WORKER_STAGE_LM, WORKER_STAGE_DIFFUSION}
 
 
-def _apply_lm_mlp_int8_quantization(model: nn.Module) -> int:
+def _apply_lm_mlp_lowbit_quantization(model: nn.Module, mode: str) -> int:
     try:
         import bitsandbytes.nn as bnb_nn
     except Exception as exc:
         raise RuntimeError(f"bitsandbytes is unavailable: {exc}") from exc
+
+    mode = str(mode).lower()
+    if mode not in {"int8", "int4"}:
+        raise ValueError(f"Unsupported low-bit quantization mode: {mode}")
 
     converted_layers = 0
     target_linear_names = {"gate_proj", "up_proj", "down_proj"}
@@ -55,13 +59,22 @@ def _apply_lm_mlp_int8_quantization(model: nn.Module) -> int:
         nonlocal converted_layers
         for child_name, child in list(module.named_children()):
             if isinstance(child, nn.Linear) and child_name in target_linear_names:
-                replacement = bnb_nn.Linear8bitLt(
-                    child.in_features,
-                    child.out_features,
-                    bias=child.bias is not None,
-                    has_fp16_weights=False,
-                    threshold=0.0,
-                )
+                if mode == "int8":
+                    replacement = bnb_nn.Linear8bitLt(
+                        child.in_features,
+                        child.out_features,
+                        bias=child.bias is not None,
+                        has_fp16_weights=False,
+                        threshold=0.0,
+                    )
+                else:
+                    replacement = bnb_nn.LinearNF4(
+                        child.in_features,
+                        child.out_features,
+                        bias=child.bias is not None,
+                        compute_dtype=torch.float16,
+                        compress_statistics=True,
+                    )
                 replacement.load_state_dict(child.state_dict())
                 setattr(module, child_name, replacement)
                 converted_layers += 1
@@ -70,6 +83,14 @@ def _apply_lm_mlp_int8_quantization(model: nn.Module) -> int:
 
     _walk(model)
     return converted_layers
+
+
+def _apply_lm_mlp_int8_quantization(model: nn.Module) -> int:
+    return _apply_lm_mlp_lowbit_quantization(model, "int8")
+
+
+def _apply_lm_mlp_int4_quantization(model: nn.Module) -> int:
+    return _apply_lm_mlp_lowbit_quantization(model, "int4")
 
 
 def _register_omegaconf_resolvers():
@@ -640,6 +661,7 @@ def _stage_generate_tokens(payload: Dict[str, Any]) -> Dict[str, Any]:
     disable_sequential = bool(payload.get("disable_sequential", False))
     enable_lm_block_swap = bool(payload.get("enable_lm_block_swap", False))
     enable_lm_mlp_int8 = bool(payload.get("enable_lm_mlp_int8", False))
+    enable_lm_mlp_int4 = bool(payload.get("enable_lm_mlp_int4", False))
     lm_block_swap_use_pinned = bool(payload.get("lm_block_swap_use_pinned", False))
     lm_blocks_to_swap = payload.get("lm_blocks_to_swap")
     lm_sub_blocks_to_swap = payload.get("lm_sub_blocks_to_swap")
@@ -668,14 +690,30 @@ def _stage_generate_tokens(payload: Dict[str, Any]) -> Dict[str, Any]:
         audiolm.load_state_dict(audiolm_state_dict, strict=False)
         audiolm = audiolm.eval()
 
-    if enable_lm_mlp_int8:
+    if enable_lm_mlp_int4 and enable_lm_mlp_int8:
+        _emit_stage_progress(
+            progress_path,
+            WORKER_STAGE_LM,
+            "Generating",
+            0.21,
+            "LLM MLP int4 is enabled; disabling LLM MLP int8.",
+        )
+        enable_lm_mlp_int8 = False
+
+    quantization_mode = None
+    if enable_lm_mlp_int4:
+        quantization_mode = "int4"
+    elif enable_lm_mlp_int8:
+        quantization_mode = "int8"
+
+    if quantization_mode is not None:
         if enable_lm_block_swap:
             _emit_stage_progress(
                 progress_path,
                 WORKER_STAGE_LM,
                 "Generating",
                 0.22,
-                "LLM MLP int8 is enabled; disabling LLM block swap for compatibility.",
+                f"LLM MLP {quantization_mode} is enabled; disabling LLM block swap for compatibility.",
             )
             enable_lm_block_swap = False
         _emit_stage_progress(
@@ -683,16 +721,19 @@ def _stage_generate_tokens(payload: Dict[str, Any]) -> Dict[str, Any]:
             WORKER_STAGE_LM,
             "Generating",
             0.26,
-            "Applying LLM MLP-only int8 quantization...",
+            f"Applying LLM MLP-only {quantization_mode} quantization...",
         )
         with suppress_output():
-            converted_layers = _apply_lm_mlp_int8_quantization(audiolm)
+            if quantization_mode == "int4":
+                converted_layers = _apply_lm_mlp_int4_quantization(audiolm)
+            else:
+                converted_layers = _apply_lm_mlp_int8_quantization(audiolm)
         _emit_stage_progress(
             progress_path,
             WORKER_STAGE_LM,
             "Generating",
             0.27,
-            f"Applied LLM MLP-only int8 quantization to {converted_layers} layers.",
+            f"Applied LLM MLP-only {quantization_mode} quantization to {converted_layers} layers.",
         )
 
     offload_audiolm = (
@@ -773,8 +814,8 @@ def _stage_generate_tokens(payload: Dict[str, Any]) -> Dict[str, Any]:
             audiolm.prepare_block_swap_before_forward()
         else:
             move_message = "Moving LLM to GPU..."
-            if enable_lm_mlp_int8:
-                move_message = "Moving LLM to GPU with MLP-only int8 quantization..."
+            if quantization_mode is not None:
+                move_message = f"Moving LLM to GPU with MLP-only {quantization_mode} quantization..."
             _emit_stage_progress(
                 progress_path,
                 WORKER_STAGE_LM,
@@ -1174,6 +1215,7 @@ class LeVoInference(torch.nn.Module):
         disable_sequential=False,
         enable_lm_block_swap=False,
         enable_lm_mlp_int8=False,
+        enable_lm_mlp_int4=False,
         lm_blocks_to_swap=None,
         lm_sub_blocks_to_swap=None,
         lm_block_swap_use_pinned=True,
@@ -1243,6 +1285,7 @@ class LeVoInference(torch.nn.Module):
                 "disable_sequential": bool(disable_sequential),
                 "enable_lm_block_swap": bool(enable_lm_block_swap),
                 "enable_lm_mlp_int8": bool(enable_lm_mlp_int8),
+                "enable_lm_mlp_int4": bool(enable_lm_mlp_int4),
                 "lm_blocks_to_swap": lm_blocks_to_swap,
                 "lm_sub_blocks_to_swap": lm_sub_blocks_to_swap,
                 "lm_block_swap_use_pinned": bool(lm_block_swap_use_pinned),
