@@ -178,6 +178,7 @@ def main():
             lm_blocks_to_swap=_safe_int(preset.get("lm_blocks_to_swap", 1), 1),
             lm_sub_blocks_to_swap=_safe_int(preset.get("lm_sub_blocks_to_swap", 0), 0),
             lm_block_swap_use_pinned=bool(preset.get("lm_block_swap_use_pinned", True)),
+            seed=_safe_int(preset.get("seed", -1), -1),
             progress_callback=progress_callback,
             cancellation_token=None,
         )

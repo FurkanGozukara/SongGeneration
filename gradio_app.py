@@ -1185,6 +1185,7 @@ def submit_lyrics(
                     lm_blocks_to_swap=lm_blocks_to_swap,
                     lm_sub_blocks_to_swap=lm_sub_blocks_to_swap,
                     lm_block_swap_use_pinned=lm_block_swap_use_pinned,
+                    seed=used_seed,
                     progress_callback=progress_callback,
                     cancellation_token=cancellation_token
                 )
@@ -1397,6 +1398,7 @@ def submit_lyrics(
                             lm_blocks_to_swap=lm_blocks_to_swap,
                             lm_sub_blocks_to_swap=lm_sub_blocks_to_swap,
                             lm_block_swap_use_pinned=lm_block_swap_use_pinned,
+                            seed=used_seed,
                             progress_callback=progress_callback,
                             cancellation_token=cancellation_token
                         )
@@ -1442,6 +1444,7 @@ def submit_lyrics(
                             lm_blocks_to_swap=lm_blocks_to_swap,
                             lm_sub_blocks_to_swap=lm_sub_blocks_to_swap,
                             lm_block_swap_use_pinned=lm_block_swap_use_pinned,
+                            seed=used_seed,
                             progress_callback=progress_callback,
                             cancellation_token=cancellation_token
                         )
@@ -1468,6 +1471,7 @@ def submit_lyrics(
                             lm_blocks_to_swap=lm_blocks_to_swap,
                             lm_sub_blocks_to_swap=lm_sub_blocks_to_swap,
                             lm_block_swap_use_pinned=lm_block_swap_use_pinned,
+                            seed=used_seed,
                             progress_callback=progress_callback,
                             cancellation_token=cancellation_token
                         )

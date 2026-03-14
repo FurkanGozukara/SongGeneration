@@ -2,6 +2,7 @@ import argparse
 import gc
 import json
 import os
+import random
 import shutil
 import subprocess
 import sys
@@ -256,6 +257,20 @@ def _cuda_cleanup(disable_cache_clear: bool):
         torch.cuda.empty_cache()
 
 
+def _set_worker_seed(seed: Any):
+    try:
+        seed_value = int(seed)
+    except (TypeError, ValueError):
+        return
+    if seed_value < 0:
+        return
+    torch.manual_seed(seed_value)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed_all(seed_value)
+    np.random.seed(seed_value)
+    random.seed(seed_value)
+
+
 def _save_stage_payload(path: str, payload: Dict[str, Any]):
     os.makedirs(os.path.dirname(path), exist_ok=True)
     torch.save(payload, path)
@@ -504,6 +519,7 @@ def _run_stage_subprocess(
 
 
 def _stage_prepare_inputs(payload: Dict[str, Any]) -> Dict[str, Any]:
+    _set_worker_seed(payload.get("seed"))
     ckpt_path = payload["ckpt_path"]
     cfg, _, version, _, _ = _load_inference_cfg(ckpt_path)
     progress_path = payload.get("progress_path")
@@ -648,6 +664,7 @@ def _stage_prepare_inputs(payload: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def _stage_generate_tokens(payload: Dict[str, Any]) -> Dict[str, Any]:
+    _set_worker_seed(payload.get("seed"))
     ckpt_path = payload["ckpt_path"]
     cfg, pt_path, version, max_duration, default_params = _load_inference_cfg(ckpt_path)
     prepare_data = _load_stage_payload(payload["prepare_path"])
@@ -823,7 +840,8 @@ def _stage_generate_tokens(payload: Dict[str, Any]) -> Dict[str, Any]:
                 0.28,
                 move_message,
             )
-            audiolm = audiolm.cuda().to(lm_dtype)
+            # Move and cast in one pass to avoid a transient float32-on-GPU copy.
+            audiolm = audiolm.to(device=lm_device, dtype=lm_dtype)
 
     _emit_stage_progress(
         progress_path,
@@ -967,6 +985,7 @@ def _stage_generate_tokens(payload: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def _stage_run_diffusion(payload: Dict[str, Any]) -> Dict[str, Any]:
+    _set_worker_seed(payload.get("seed"))
     ckpt_path = payload["ckpt_path"]
     cfg, _, _, max_duration, _ = _load_inference_cfg(ckpt_path)
     prepare_data = _load_stage_payload(payload["prepare_path"])
@@ -1219,6 +1238,7 @@ class LeVoInference(torch.nn.Module):
         lm_blocks_to_swap=None,
         lm_sub_blocks_to_swap=None,
         lm_block_swap_use_pinned=True,
+        seed=None,
         progress_callback=None,
         cancellation_token=None,
     ):
@@ -1232,6 +1252,8 @@ class LeVoInference(torch.nn.Module):
         pipeline_start_time = time.time()
 
         try:
+            if seed is None and isinstance(params, dict):
+                seed = params.get("seed")
             prepare_output_path = os.path.join(workspace_dir, "prepare_output.pt")
             lm_output_path = os.path.join(workspace_dir, "lm_output.pt")
             diffusion_output_path = os.path.join(workspace_dir, "diffusion_output.pt")
@@ -1255,6 +1277,7 @@ class LeVoInference(torch.nn.Module):
                 "auto_prompt_path": auto_prompt_path,
                 "gen_type": gen_type,
                 "disable_cache_clear": bool(disable_cache_clear),
+                "seed": seed,
                 "progress_path": progress_path,
             }
             prepare_result = _run_stage_subprocess(
@@ -1289,6 +1312,7 @@ class LeVoInference(torch.nn.Module):
                 "lm_blocks_to_swap": lm_blocks_to_swap,
                 "lm_sub_blocks_to_swap": lm_sub_blocks_to_swap,
                 "lm_block_swap_use_pinned": bool(lm_block_swap_use_pinned),
+                "seed": seed,
                 "progress_path": progress_path,
             }
             lm_result = _run_stage_subprocess(
@@ -1318,6 +1342,7 @@ class LeVoInference(torch.nn.Module):
                 "disable_offload": bool(disable_offload),
                 "disable_cache_clear": bool(disable_cache_clear),
                 "disable_sequential": bool(disable_sequential),
+                "seed": seed,
                 "progress_path": progress_path,
             }
             diffusion_result = _run_stage_subprocess(

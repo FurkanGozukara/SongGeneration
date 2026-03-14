@@ -445,6 +445,7 @@ def generate_single_song(model, params, progress_tracker=None, cancellation_toke
         lm_blocks_to_swap=params.get('lm_blocks_to_swap', 1),
         lm_sub_blocks_to_swap=params.get('lm_sub_blocks_to_swap', 0),
         lm_block_swap_use_pinned=params.get('lm_block_swap_use_pinned', True),
+        seed=used_seed,
         progress_callback=internal_progress_callback,
         cancellation_token=cancellation_token
     )
@@ -483,6 +484,7 @@ def generate_single_song(model, params, progress_tracker=None, cancellation_toke
             lm_blocks_to_swap=params.get('lm_blocks_to_swap', 1),
             lm_sub_blocks_to_swap=params.get('lm_sub_blocks_to_swap', 0),
             lm_block_swap_use_pinned=params.get('lm_block_swap_use_pinned', True),
+            seed=used_seed,
             progress_callback=internal_progress_callback,
             cancellation_token=cancellation_token
         )
@@ -510,6 +512,7 @@ def generate_single_song(model, params, progress_tracker=None, cancellation_toke
             lm_blocks_to_swap=params.get('lm_blocks_to_swap', 1),
             lm_sub_blocks_to_swap=params.get('lm_sub_blocks_to_swap', 0),
             lm_block_swap_use_pinned=params.get('lm_block_swap_use_pinned', True),
+            seed=used_seed,
             progress_callback=internal_progress_callback,
             cancellation_token=cancellation_token
         )

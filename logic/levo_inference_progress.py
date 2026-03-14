@@ -127,7 +127,8 @@ class LeVoInferenceWithProgress(torch.nn.Module):
             offload_profiler.clean_cache_wrapper(**(audiolm_offload_param.clean_cache_param_dict()))
         else:
             lm_dtype = torch.float32 if disable_fp16 else torch.float16
-            audiolm = audiolm.cuda().to(lm_dtype)
+            # Move and cast in one pass to avoid a transient float32-on-GPU copy.
+            audiolm = audiolm.to(device=torch.device('cuda:0'), dtype=lm_dtype)
 
         model = CodecLM(name = "tmp",
             lm = audiolm,
