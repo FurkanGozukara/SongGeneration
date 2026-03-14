@@ -65,7 +65,7 @@ class CodecLM:
                               top_p: float = 0.0, temperature: float = 1.0,
                               duration: float = 30.0, cfg_coef: float = 3.0,
                              extend_stride: float = 18, record_tokens: bool = False,
-                             record_window: int = 50):
+                             record_window: int = 50, allow_eos: bool = False):
         """Set the generation parameters for CodecLM.
 
         Args:
@@ -93,6 +93,7 @@ class CodecLM:
             'cfg_coef': cfg_coef,
             'record_tokens': record_tokens,
             'record_window': record_window,
+            'allow_eos': allow_eos,
         }
 
     def set_custom_progress_callback(self, progress_callback: tp.Optional[tp.Callable[[int, int], None]] = None):
@@ -141,7 +142,7 @@ class CodecLM:
         texts, audio_qt_embs = self._prepare_tokens_and_attributes(lyrics=lyrics, melody_wavs=melody_wavs, vocal_wavs=vocal_wavs, bgm_wavs=bgm_wavs, melody_is_wav=melody_is_wav)
         tokens = self._generate_tokens(texts, descriptions, audio_qt_embs)
 
-        if (tokens == self.lm.eos_token_id).any():
+        if self.generation_params.get('allow_eos', False) and (tokens == self.lm.eos_token_id).any():
             length = torch.nonzero(torch.eq(tokens, self.lm.eos_token_id))[:,-1].min()
             tokens = tokens[...,:length] 
 

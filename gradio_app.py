@@ -579,6 +579,7 @@ def collect_current_parameters(
     cfg_coef, guidance_scale, use_sampling, extend_stride,
     gen_type, chunked, chunk_size, record_tokens, record_window,
     disable_offload, disable_cache_clear, disable_fp16, disable_sequential, enable_lm_block_swap,
+    enable_lm_mlp_int8,
     lm_blocks_to_swap, lm_sub_blocks_to_swap, lm_block_swap_use_pinned,
     num_generations, loop_presets, randomize_params
 ):
@@ -618,6 +619,7 @@ def collect_current_parameters(
         'disable_fp16': disable_fp16,
         'disable_sequential': disable_sequential,
         'enable_lm_block_swap': enable_lm_block_swap,
+        'enable_lm_mlp_int8': enable_lm_mlp_int8,
         'lm_blocks_to_swap': lm_blocks_to_swap,
         'lm_sub_blocks_to_swap': lm_sub_blocks_to_swap,
         'lm_block_swap_use_pinned': lm_block_swap_use_pinned,
@@ -740,6 +742,7 @@ def run_batch_processing(
     cfg_coef, guidance_scale, use_sampling, extend_stride,
     gen_type, chunked, chunk_size, record_tokens, record_window,
     disable_offload, disable_cache_clear, disable_fp16, disable_sequential, enable_lm_block_swap,
+    enable_lm_mlp_int8,
     lm_blocks_to_swap, lm_sub_blocks_to_swap, lm_block_swap_use_pinned,
     randomize_params, auto_prompt_enabled, auto_prompt_type, progress=gr.Progress()
 ):
@@ -768,6 +771,7 @@ def run_batch_processing(
         cfg_coef, guidance_scale, use_sampling, extend_stride,
         gen_type, chunked, chunk_size, record_tokens, record_window,
         disable_offload, disable_cache_clear, disable_fp16, disable_sequential, enable_lm_block_swap,
+        enable_lm_mlp_int8,
         lm_blocks_to_swap, lm_sub_blocks_to_swap, lm_block_swap_use_pinned,
         num_generations, loop_presets, randomize_params
     )
@@ -963,6 +967,7 @@ def submit_lyrics(
     cfg_coef, guidance_scale, use_sampling, extend_stride,
     gen_type, chunked, chunk_size, record_tokens, record_window,
     disable_offload, disable_cache_clear, disable_fp16, disable_sequential, enable_lm_block_swap,
+    enable_lm_mlp_int8,
     lm_blocks_to_swap, lm_sub_blocks_to_swap, lm_block_swap_use_pinned,
     num_generations, loop_presets, randomize_params, 
     auto_prompt_enabled, auto_prompt_type,  # New parameters
@@ -1074,7 +1079,11 @@ def submit_lyrics(
     }
     
     # Log the actual values for debugging
-    output_messages(f"Requested steps: {max_gen_length}, Actual generation: {actual_steps} steps (~{duration_from_steps:.1f}s, {int(duration_from_steps/60)}m{int(duration_from_steps%60)}s)")
+    output_messages(
+        f"Requested target: {max_gen_length} LM steps (~{duration_from_steps:.1f}s, "
+        f"{int(duration_from_steps/60)}m{int(duration_from_steps%60)}s). "
+        "Final rendered length is reported after generation completes."
+    )
     
     if force_extra_prompt and not (extra_prompt and extra_prompt.strip()):
         output_messages("[WARN] Warning: 'Use only extra prompt' is enabled but no extra description was provided!")
@@ -1170,6 +1179,7 @@ def submit_lyrics(
                     disable_fp16=disable_fp16,
                     disable_sequential=disable_sequential,
                     enable_lm_block_swap=enable_lm_block_swap,
+                    enable_lm_mlp_int8=enable_lm_mlp_int8,
                     lm_blocks_to_swap=lm_blocks_to_swap,
                     lm_sub_blocks_to_swap=lm_sub_blocks_to_swap,
                     lm_block_swap_use_pinned=lm_block_swap_use_pinned,
@@ -1380,6 +1390,7 @@ def submit_lyrics(
                             disable_fp16=disable_fp16,
                             disable_sequential=disable_sequential,
                             enable_lm_block_swap=enable_lm_block_swap,
+                            enable_lm_mlp_int8=enable_lm_mlp_int8,
                             lm_blocks_to_swap=lm_blocks_to_swap,
                             lm_sub_blocks_to_swap=lm_sub_blocks_to_swap,
                             lm_block_swap_use_pinned=lm_block_swap_use_pinned,
@@ -1423,6 +1434,7 @@ def submit_lyrics(
                             disable_fp16=disable_fp16,
                             disable_sequential=disable_sequential,
                             enable_lm_block_swap=enable_lm_block_swap,
+                            enable_lm_mlp_int8=enable_lm_mlp_int8,
                             lm_blocks_to_swap=lm_blocks_to_swap,
                             lm_sub_blocks_to_swap=lm_sub_blocks_to_swap,
                             lm_block_swap_use_pinned=lm_block_swap_use_pinned,
@@ -1447,6 +1459,7 @@ def submit_lyrics(
                             disable_fp16=disable_fp16,
                             disable_sequential=disable_sequential,
                             enable_lm_block_swap=enable_lm_block_swap,
+                            enable_lm_mlp_int8=enable_lm_mlp_int8,
                             lm_blocks_to_swap=lm_blocks_to_swap,
                             lm_sub_blocks_to_swap=lm_sub_blocks_to_swap,
                             lm_block_swap_use_pinned=lm_block_swap_use_pinned,
@@ -1500,6 +1513,12 @@ def submit_lyrics(
                     output_messages(f"OK FLAC saved: {base_filename}.flac")
                 except Exception as e:
                     print(f"Warning: Could not save FLAC: {e}")
+
+                actual_rendered_seconds = float(audio_data.shape[0]) / float(MODEL.cfg.sample_rate)
+                output_messages(
+                    f"Rendered audio length: {actual_rendered_seconds:.2f}s "
+                    f"({int(actual_rendered_seconds // 60)}m{int(actual_rendered_seconds % 60):02d}s)"
+                )
                 
                 # Save separate tracks if generated
                 vocal_wav_path = None
@@ -1593,6 +1612,7 @@ def submit_lyrics(
                     cfg_coef, guidance_scale, use_sampling, extend_stride,
                     gen_type, chunked, chunk_size, record_tokens, record_window,
                     disable_offload, disable_cache_clear, disable_fp16, disable_sequential, enable_lm_block_swap,
+                    enable_lm_mlp_int8,
                     lm_blocks_to_swap, lm_sub_blocks_to_swap, lm_block_swap_use_pinned,
                     num_generations, loop_presets, randomize_params
                 )
@@ -1600,6 +1620,7 @@ def submit_lyrics(
                 metadata['model'] = CURRENT_MODEL_PATH
                 metadata['generation_index'] = gen_idx + 1
                 metadata['total_generations'] = num_generations
+                metadata['rendered_duration_seconds'] = actual_rendered_seconds
                 metadata['output_files'] = {
                     'wav': wav_path,
                     'mp3': mp3_path,
@@ -1750,6 +1771,12 @@ with gr.Blocks(title="SECourses LeVo Song Generation App",theme=gr.themes.Soft()
                                 step=1,
                                 info=format_duration_slider_info(DEFAULT_MAX_GENERATION_STEPS)
                             )
+                            with gr.Row():
+                                enable_lm_mlp_int8 = gr.Checkbox(
+                                    label="Enable LM MLP-Only Int8",
+                                    value=False,
+                                    info="Experimental. Quantizes only the large LM MLP linears to int8 to cut VRAM. This mainly saves VRAM, not speed."
+                                )
                             with gr.Row():
                                 enable_lm_block_swap = gr.Checkbox(
                                     label="Enable LM Block Swap",
@@ -2476,8 +2503,8 @@ with gr.Blocks(title="SECourses LeVo Song Generation App",theme=gr.themes.Soft()
         param_values = list(args)
         
         # Safety check for parameter count (updated for new parameters)
-        if len(param_values) != 42:  # Updated count including LM swap controls and auto prompt parameters
-            error_msg = f"Invalid parameter count: expected 42, got {len(param_values)}"
+        if len(param_values) != 43:  # Updated count including LM swap/int8 controls and auto prompt parameters
+            error_msg = f"Invalid parameter count: expected 43, got {len(param_values)}"
             print(f"[ERROR] {error_msg}")
             gr.Error(error_msg)
             return gr.Dropdown(choices=preset_manager.get_preset_list())
@@ -2521,11 +2548,12 @@ with gr.Blocks(title="SECourses LeVo Song Generation App",theme=gr.themes.Soft()
             'disable_fp16': param_values[34],
             'disable_sequential': param_values[35],
             'enable_lm_block_swap': param_values[36],
-            'lm_blocks_to_swap': param_values[37],
-            'lm_sub_blocks_to_swap': param_values[38],
-            'lm_block_swap_use_pinned': param_values[39],
-            'auto_prompt_enabled': param_values[40],
-            'auto_prompt_type': param_values[41]
+            'enable_lm_mlp_int8': param_values[37],
+            'lm_blocks_to_swap': param_values[38],
+            'lm_sub_blocks_to_swap': param_values[39],
+            'lm_block_swap_use_pinned': param_values[40],
+            'auto_prompt_enabled': param_values[41],
+            'auto_prompt_type': param_values[42]
         }
         # Save preset
         
@@ -2544,13 +2572,13 @@ with gr.Blocks(title="SECourses LeVo Song Generation App",theme=gr.themes.Soft()
     def handle_load_preset(preset_name, current_lyrics):
         """Load a preset and update all UI components"""
         if not preset_name:
-            return [gr.update()] * 42  # Updated to 42 for all parameters (including new ones)
+            return [gr.update()] * 43  # Updated to 43 for all parameters (including new ones)
         
         preset_data, message = preset_manager.load_preset(preset_name)
         if preset_data is None:
             print(f"[ERROR] {message}")
             gr.Error(message)
-            return [gr.update()] * 42
+            return [gr.update()] * 43
         
         # Load preset values
         
@@ -2593,6 +2621,7 @@ with gr.Blocks(title="SECourses LeVo Song Generation App",theme=gr.themes.Soft()
             'disable_fp16': False,
             'disable_sequential': False,
             'enable_lm_block_swap': False,
+            'enable_lm_mlp_int8': False,
             'lm_blocks_to_swap': 1,
             'lm_sub_blocks_to_swap': 0,
             'lm_block_swap_use_pinned': True,
@@ -2616,6 +2645,9 @@ with gr.Blocks(title="SECourses LeVo Song Generation App",theme=gr.themes.Soft()
         )
         values['enable_lm_block_swap'] = bool(
             values.get('enable_lm_block_swap', defaults['enable_lm_block_swap'])
+        )
+        values['enable_lm_mlp_int8'] = bool(
+            values.get('enable_lm_mlp_int8', defaults['enable_lm_mlp_int8'])
         )
         values['lm_block_swap_use_pinned'] = bool(
             values.get('lm_block_swap_use_pinned', defaults['lm_block_swap_use_pinned'])
@@ -2722,6 +2754,7 @@ with gr.Blocks(title="SECourses LeVo Song Generation App",theme=gr.themes.Soft()
             values['disable_fp16'],
             values['disable_sequential'],
             values['enable_lm_block_swap'],
+            values['enable_lm_mlp_int8'],
             values['lm_blocks_to_swap'],
             values['lm_sub_blocks_to_swap'],
             values['lm_block_swap_use_pinned'],
@@ -2741,6 +2774,7 @@ with gr.Blocks(title="SECourses LeVo Song Generation App",theme=gr.themes.Soft()
         cfg_coef, guidance_scale, use_sampling, extend_stride,
         gen_type, chunked, chunk_size, record_tokens, record_window,
         disable_offload, disable_cache_clear, disable_fp16, disable_sequential, enable_lm_block_swap,
+        enable_lm_mlp_int8,
         lm_blocks_to_swap, lm_sub_blocks_to_swap, lm_block_swap_use_pinned,
         auto_prompt_enabled, auto_prompt_type  # New parameters
     ]
@@ -2950,6 +2984,7 @@ with gr.Blocks(title="SECourses LeVo Song Generation App",theme=gr.themes.Soft()
             cfg_coef, guidance_scale, use_sampling, extend_stride,
             gen_type, chunked, chunk_size, record_tokens, record_window,
             disable_offload, disable_cache_clear, disable_fp16, disable_sequential, enable_lm_block_swap,
+            enable_lm_mlp_int8,
             lm_blocks_to_swap, lm_sub_blocks_to_swap, lm_block_swap_use_pinned,
             num_generations, loop_presets, randomize_params,
             auto_prompt_enabled, auto_prompt_type,  # New parameters
@@ -2997,6 +3032,7 @@ with gr.Blocks(title="SECourses LeVo Song Generation App",theme=gr.themes.Soft()
             cfg_coef, guidance_scale, use_sampling, extend_stride,
             gen_type, chunked, chunk_size, record_tokens, record_window,
             disable_offload, disable_cache_clear, disable_fp16, disable_sequential, enable_lm_block_swap,
+            enable_lm_mlp_int8,
             lm_blocks_to_swap, lm_sub_blocks_to_swap, lm_block_swap_use_pinned,
             randomize_params, auto_prompt_enabled, auto_prompt_type  # Add new parameters
         ],

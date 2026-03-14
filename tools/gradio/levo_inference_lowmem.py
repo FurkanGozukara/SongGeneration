@@ -12,6 +12,7 @@ from typing import Any, Dict
 
 import numpy as np
 import torch
+import torch.nn as nn
 from omegaconf import OmegaConf
 
 # Ensure project root is importable when this file is executed directly.
@@ -39,6 +40,36 @@ WORKER_STAGE_PREPARE = "prepare"
 WORKER_STAGE_LM = "lm"
 WORKER_STAGE_DIFFUSION = "diffusion"
 WORKER_STAGES = {WORKER_STAGE_PREPARE, WORKER_STAGE_LM, WORKER_STAGE_DIFFUSION}
+
+
+def _apply_lm_mlp_int8_quantization(model: nn.Module) -> int:
+    try:
+        import bitsandbytes.nn as bnb_nn
+    except Exception as exc:
+        raise RuntimeError(f"bitsandbytes is unavailable: {exc}") from exc
+
+    converted_layers = 0
+    target_linear_names = {"gate_proj", "up_proj", "down_proj"}
+
+    def _walk(module: nn.Module):
+        nonlocal converted_layers
+        for child_name, child in list(module.named_children()):
+            if isinstance(child, nn.Linear) and child_name in target_linear_names:
+                replacement = bnb_nn.Linear8bitLt(
+                    child.in_features,
+                    child.out_features,
+                    bias=child.bias is not None,
+                    has_fp16_weights=False,
+                    threshold=0.0,
+                )
+                replacement.load_state_dict(child.state_dict())
+                setattr(module, child_name, replacement)
+                converted_layers += 1
+            else:
+                _walk(child)
+
+    _walk(model)
+    return converted_layers
 
 
 def _register_omegaconf_resolvers():
@@ -608,6 +639,7 @@ def _stage_generate_tokens(payload: Dict[str, Any]) -> Dict[str, Any]:
     disable_fp16 = bool(payload.get("disable_fp16", False))
     disable_sequential = bool(payload.get("disable_sequential", False))
     enable_lm_block_swap = bool(payload.get("enable_lm_block_swap", False))
+    enable_lm_mlp_int8 = bool(payload.get("enable_lm_mlp_int8", False))
     lm_block_swap_use_pinned = bool(payload.get("lm_block_swap_use_pinned", False))
     lm_blocks_to_swap = payload.get("lm_blocks_to_swap")
     lm_sub_blocks_to_swap = payload.get("lm_sub_blocks_to_swap")
@@ -636,9 +668,44 @@ def _stage_generate_tokens(payload: Dict[str, Any]) -> Dict[str, Any]:
         audiolm.load_state_dict(audiolm_state_dict, strict=False)
         audiolm = audiolm.eval()
 
+    if enable_lm_mlp_int8:
+        if enable_lm_block_swap:
+            _emit_stage_progress(
+                progress_path,
+                WORKER_STAGE_LM,
+                "Generating",
+                0.22,
+                "LM MLP int8 is enabled; disabling LM block swap for compatibility.",
+            )
+            enable_lm_block_swap = False
+        if not disable_offload:
+            _emit_stage_progress(
+                progress_path,
+                WORKER_STAGE_LM,
+                "Generating",
+                0.24,
+                "LM MLP int8 is enabled; disabling LM offload profile for compatibility.",
+            )
+        _emit_stage_progress(
+            progress_path,
+            WORKER_STAGE_LM,
+            "Generating",
+            0.26,
+            "Applying LM MLP-only int8 quantization...",
+        )
+        with suppress_output():
+            converted_layers = _apply_lm_mlp_int8_quantization(audiolm)
+        _emit_stage_progress(
+            progress_path,
+            WORKER_STAGE_LM,
+            "Generating",
+            0.27,
+            f"Applied LM MLP-only int8 quantization to {converted_layers} layers.",
+        )
+
     offload_audiolm = (
         False
-        if (disable_offload or enable_lm_block_swap)
+        if (disable_offload or enable_lm_block_swap or enable_lm_mlp_int8)
         else (True if "offload" in cfg.keys() and "audiolm" in cfg.offload else False)
     )
     offload_profiler = None
@@ -713,12 +780,15 @@ def _stage_generate_tokens(payload: Dict[str, Any]) -> Dict[str, Any]:
             audiolm.move_to_device_except_swap_blocks(lm_device)
             audiolm.prepare_block_swap_before_forward()
         else:
+            move_message = "Moving LM to GPU..."
+            if enable_lm_mlp_int8:
+                move_message = "Moving LM to GPU with MLP-only int8 quantization..."
             _emit_stage_progress(
                 progress_path,
                 WORKER_STAGE_LM,
                 "Generating",
                 0.28,
-                "Moving LM to GPU...",
+                move_message,
             )
             audiolm = audiolm.cuda().to(lm_dtype)
 
@@ -1111,6 +1181,7 @@ class LeVoInference(torch.nn.Module):
         disable_fp16=False,
         disable_sequential=False,
         enable_lm_block_swap=False,
+        enable_lm_mlp_int8=False,
         lm_blocks_to_swap=None,
         lm_sub_blocks_to_swap=None,
         lm_block_swap_use_pinned=True,
@@ -1179,6 +1250,7 @@ class LeVoInference(torch.nn.Module):
                 "disable_fp16": bool(disable_fp16),
                 "disable_sequential": bool(disable_sequential),
                 "enable_lm_block_swap": bool(enable_lm_block_swap),
+                "enable_lm_mlp_int8": bool(enable_lm_mlp_int8),
                 "lm_blocks_to_swap": lm_blocks_to_swap,
                 "lm_sub_blocks_to_swap": lm_sub_blocks_to_swap,
                 "lm_block_swap_use_pinned": bool(lm_block_swap_use_pinned),

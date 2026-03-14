@@ -419,7 +419,8 @@ class LmModel(StreamingModule):
                  check: bool = False,        
                  record_tokens: bool = True,
                  record_window: int = 150,
-                 progress_callback: tp.Optional[tp.Callable[[int, int], None]] = None
+                 progress_callback: tp.Optional[tp.Callable[[int, int], None]] = None,
+                 allow_eos: bool = False
                  ) -> torch.Tensor:
         """Generate tokens sampling from the model given a prompt or unconditionally. Generation can
         be perform in a greedy fashion or using sampling with top K and top P strategies.
@@ -499,7 +500,8 @@ class LmModel(StreamingModule):
                     curr_sequence, condition_tensors, use_sampling, temp, top_k, top_p,
                     cfg_coef=cfg_coef, 
                     sampled_token_pool=record_token_pool[-record_window:] if record_tokens else None,
-                    ignore_tokens = ignore_tokens
+                    ignore_tokens = ignore_tokens,
+                    allow_eos=allow_eos,
                     )
                 # ensure the tokens that should be masked are properly set to special_token_id
                 # as the model never output special_token_id
@@ -507,7 +509,8 @@ class LmModel(StreamingModule):
                 next_token[~valid_mask] = self.special_token_id
                 # 检查eos id
                 next_token[is_end] = self.special_token_id
-                is_end = is_end | (next_token == self.eos_token_id)
+                if allow_eos:
+                    is_end = is_end | (next_token == self.eos_token_id)
                 # ensure we don't overwrite prompt tokens, we only write over unknown tokens
                 # (then mask tokens should be left as is as well, which is correct)
                 gen_sequence[..., offset:offset+1] = torch.where(
@@ -524,7 +527,7 @@ class LmModel(StreamingModule):
                         progress_callback(generated_tokens, total_tokens)
                     except Exception:
                         pass
-                if torch.all(is_end):
+                if allow_eos and torch.all(is_end):
                     gen_sequence = gen_sequence[..., :offset+1]
                     break
                 prev_offset = offset
@@ -556,7 +559,8 @@ class LmModel(StreamingModule):
                            top_p: float = 0.0,
                            cfg_coef: tp.Optional[float] = None,
                            sampled_token_pool: tp.Optional[list] = None,
-                           ignore_tokens: tp.Optional[torch.tensor] = torch.tensor([])) -> torch.Tensor:
+                           ignore_tokens: tp.Optional[torch.tensor] = torch.tensor([]),
+                           allow_eos: bool = False) -> torch.Tensor:
         """Sample next token from the model given a sequence and a set of conditions. The model supports
         multiple sampling strategies (greedy sampling, softmax, top-k, top-p...).
 
@@ -596,6 +600,9 @@ class LmModel(StreamingModule):
                 q_count = torch.bincount(torch.unique(sampled_token_pool[q]))
                 tmp = min(q_count.shape[-1], self.code_size - 1) 
                 logits[:, q, :tmp] /= (1.1 ** q_count[:tmp])
+
+        if not allow_eos and 0 <= self.eos_token_id < logits.shape[-1]:
+            logits[..., self.eos_token_id] = float('-inf')
 
         # Apply softmax for sampling if temp > 0. Else, do greedy sampling to avoid zero division error.
         if(ignore_tokens is not None and len(ignore_tokens) > 0):
