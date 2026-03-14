@@ -175,7 +175,7 @@ lyrics
                     minimum=0.1,
                     maximum=3.0,
                     step=0.1,
-                    value=1.5,
+                    value=1.0,
                     interactive=True,
                     elem_id="cfg-coef",
                 )

@@ -63,7 +63,7 @@ class CodecLM:
 
     def set_generation_params(self, use_sampling: bool = True, top_k: int = 250,
                               top_p: float = 0.0, temperature: float = 1.0,
-                              duration: float = 30.0, cfg_coef: float = 3.0,
+                              duration: float = 30.0, cfg_coef: float = 1.0,
                              extend_stride: float = 18, record_tokens: bool = False,
                              record_window: int = 50, allow_eos: bool = False):
         """Set the generation parameters for CodecLM.
@@ -74,7 +74,7 @@ class CodecLM:
             top_p (float, optional): top_p used for sampling, when set to 0 top_k is used. Defaults to 0.0.
             temperature (float, optional): Softmax temperature parameter. Defaults to 1.0.
             duration (float, optional): Duration of the generated waveform. Defaults to 30.0.
-            cfg_coef (float, optional): Coefficient used for classifier free guidance. Defaults to 3.0.
+            cfg_coef (float, optional): Coefficient used for classifier free guidance. Defaults to 1.0.
             two_step_cfg (bool, optional): If True, performs 2 forward for Classifier Free Guidance,
                 instead of batching together the two. This has some impact on how things
                 are padded but seems to have little impact in practice.

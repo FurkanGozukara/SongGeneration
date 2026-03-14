@@ -138,7 +138,7 @@ class LmModel(StreamingModule):
         if code_depth > 1:
             self.linears = nn.ModuleList([nn.Linear(dim, self.code_size, bias=False) 
                                         for _ in range(code_depth - 1)])
-        
+
         self._init_weights(weight_init, depthwise_init, zero_bias_init)
         self._fsdp: tp.Optional[nn.Module]
         self.__dict__['_fsdp'] = None
@@ -146,6 +146,13 @@ class LmModel(StreamingModule):
         self.reset_streaming()
         self._block_swap_enabled = False
         self._block_swap_config: tp.Dict[str, int] = {}
+
+    @staticmethod
+    def _cfg_is_effectively_disabled(cfg_coef: float) -> bool:
+        try:
+            return abs(float(cfg_coef) - 1.0) < 1e-6
+        except (TypeError, ValueError):
+            return False
 
     def enable_block_swap(
         self,
@@ -456,7 +463,15 @@ class LmModel(StreamingModule):
             possible_num_samples.append(1)
         assert [x == possible_num_samples[0] for x in possible_num_samples], "Inconsistent inputs shapes"
         num_samples = possible_num_samples[0]
-        condition_tensors = self.prepare_condition_tensors(batch_size=1, text=texts, descriptions=descriptions, audio_qt_emb=audio_qt_embs, prepare_null_condition=True)
+        effective_cfg_coef = self.cfg_coef if cfg_coef is None else cfg_coef
+        use_cfg = not self._cfg_is_effectively_disabled(effective_cfg_coef)
+        condition_tensors = self.prepare_condition_tensors(
+            batch_size=1,
+            text=texts,
+            descriptions=descriptions,
+            audio_qt_emb=audio_qt_embs,
+            prepare_null_condition=use_cfg,
+        )
         # 3) Prepare token pool
         record_token_pool = None
         if record_tokens:
@@ -498,7 +513,7 @@ class LmModel(StreamingModule):
                 # sample next token from the model, next token shape is [B, K, 1]
                 next_token = self._sample_next_token(
                     curr_sequence, condition_tensors, use_sampling, temp, top_k, top_p,
-                    cfg_coef=cfg_coef, 
+                    cfg_coef=effective_cfg_coef,
                     sampled_token_pool=record_token_pool[-record_window:] if record_tokens else None,
                     ignore_tokens = ignore_tokens,
                     allow_eos=allow_eos,
@@ -582,12 +597,15 @@ class LmModel(StreamingModule):
         B = sequence.shape[0]
         cfg_coef = self.cfg_coef if cfg_coef is None else cfg_coef
         model = self if self._fsdp is None else self._fsdp
-        
-        # Preparing for CFG, predicting both conditional and unconditional logits.
-        sequence = torch.cat([sequence, sequence], dim=0)
-        all_logits = model(sequence, condition_tensors=condition_tensors)
-        cond_logits, uncond_logits = all_logits.split(B, dim=0)  # [B, K, T, card]
-        logits = uncond_logits + (cond_logits - uncond_logits) * cfg_coef
+
+        if self._cfg_is_effectively_disabled(cfg_coef):
+            logits = model(sequence, condition_tensors=condition_tensors)
+        else:
+            # Preparing for CFG, predicting both conditional and unconditional logits.
+            sequence = torch.cat([sequence, sequence], dim=0)
+            all_logits = model(sequence, condition_tensors=condition_tensors)
+            cond_logits, uncond_logits = all_logits.split(B, dim=0)  # [B, K, T, card]
+            logits = uncond_logits + (cond_logits - uncond_logits) * cfg_coef
 
         logits = logits.permute(0, 1, 3, 2)  # [B, K, card, T]
         logits = logits[..., -1]  # [B x K x card]

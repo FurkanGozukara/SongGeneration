@@ -52,7 +52,7 @@ class LeVoInference(torch.nn.Module):
 
 
         self.default_params = dict(
-            cfg_coef = 1.5,
+            cfg_coef = 1.0,
             temperature = 0.8,
             top_k = 50,
             top_p = 0.0,

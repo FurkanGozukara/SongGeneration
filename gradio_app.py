@@ -2080,9 +2080,9 @@ with gr.Blocks(title="SECourses LeVo Song Generation App",theme=gr.themes.Soft()
                             label="CFG Coefficient",
                             minimum=0.1,
                             maximum=5.0,
-                            value=1.5,
+                            value=1.0,
                             step=0.1,
-                            info="How closely vocals follow your text. 1.5 default; raise to 1.8-2.2 when the model drifts from lyrics; >2.4 can sound brittle; drop to 1.2 for freer improv."
+                            info="How closely vocals follow your text. 1.0 is the default optimized path; raise to 1.4-2.0 when the model drifts from lyrics; >2.4 can sound brittle."
                         )
                         guidance_scale = gr.Slider(
                             label="Diffusion Guidance Scale",
@@ -2622,7 +2622,7 @@ with gr.Blocks(title="SECourses LeVo Song Generation App",theme=gr.themes.Soft()
             'temperature': 0.8,
             'top_k': -1,
             'top_p': 0.0,
-            'cfg_coef': 1.5,
+            'cfg_coef': 1.0,
             'guidance_scale': 1.5,
             'use_sampling': True,
             'extend_stride': 5,
