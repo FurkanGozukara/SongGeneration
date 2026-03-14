@@ -36,38 +36,88 @@ from logic.progress_interceptor import intercept_progress
 from logic.auto_prompt_manager import AutoPromptManager
 
 EXAMPLE_LYRICS = """
-[intro-short]
+[intro-medium]
 
 [verse]
-Streetlights flicker in the night
-I walk through familiar corners
-Memories come flooding like a tide
-Your smile so clear in my mind
-Can't erase it from my heart
-Those sweet moments we once had
-Now only I remain to remember
+Woke up with the fire, put the weight on my back
+No gold on my wrist, still I’m dressed in facts
+Hands in the dirt, put the work on track
+Built from the ground, never life on lack
 
-[verse]
-My phone screen lights up
-It's a message from you
-Just a few simple words
-Yet they make tears stream down my face
-The warmth of your embrace back then
-Now feels so distant and far
-How I wish to return to the past
-To have your company once more
+I don’t need the noise, I don’t move for praise
+I just keep it pure in a world that fades
+Calm in the storm, let the heart stay brave
+Planting good seeds, let the roots make waves
 
 [chorus]
-The warmth of memories remains
-But you're no longer here
-My heart filled with love
-Yet pierced by longing and pain
-The rhythm of music plays on
-But my heart wanders aimlessly
-In days without you
-How should I continue forward
+I came with peace, I came with light
+Hands stay clean and my soul stays right
+Work all day, still I move real kind
+Head held low but I aim sky-high
 
-[outro-short]
+No big talk, I don’t need that crown
+Strong stand tall, keep it humble now
+Brick by brick, yeah I built this sound
+Quiet on top, let the truth get loud
+
+[verse]
+I was down, I was dust, had to learn my lane
+Now I move with grace, never chasing fame
+If I eat, we eat, let the whole team gain
+Put love in the soil, let it heal that pain
+
+Never flex too hard, let the code stay deep
+Made peace with the grind while the world can sleep
+Heart stay soft but the mind don’t creep
+What I earn, what I keep, what I sow, I reap
+
+[chorus]
+I came with peace, I came with light
+Hands stay clean and my soul stays right
+Work all day, still I move real kind
+Head held low but I aim sky-high
+
+No big talk, I don’t need that crown
+Strong stand tall, keep it humble now
+Brick by brick, yeah I built this sound
+Quiet on top, let the truth get loud
+
+[inst-short]
+
+[bridge]
+I don’t wanna shine if my people can’t glow
+I don’t want the win if it costs my soul
+Real ones rise but they still stay low
+Deep roots grow where the wild winds blow
+
+I got faith in the good, got strength in the calm
+Got scars in my skin but peace in my arms
+I don’t move in hate, I don’t feed that dark
+I just light one flame, let it spread through hearts
+
+[chorus]
+I came with peace, I came with light
+Hands stay clean and my soul stays right
+Work all day, still I move real kind
+Head held low but I aim sky-high
+
+No big talk, I don’t need that crown
+Strong stand tall, keep it humble now
+Brick by brick, yeah I built this sound
+Quiet on top, let the truth get loud
+
+[chorus]
+I came with peace, I came with light
+Hands stay clean and my soul stays right
+Work all day, still I move real kind
+Head held low but I aim sky-high
+
+No big talk, I don’t need that crown
+Strong stand tall, keep it humble now
+Brick by brick, yeah I built this sound
+Quiet on top, let the truth get loud
+
+[outro-medium]
 """.strip()
 
 # Generation types and auto prompt types from original repo
@@ -89,6 +139,86 @@ DEFAULT_DURATION_SECONDS = int(DEFAULT_GENERATION_STEPS / STEPS_PER_SECOND)
 DURATION_SLIDER_UI_MIN = MIN_DURATION_SECONDS
 
 APP_DIR = op.dirname(op.abspath(__file__))
+
+BUTTON_CSS = """
+@keyframes glowPulse {
+    0% {
+        transform: translateY(0);
+        filter: saturate(1);
+    }
+    50% {
+        transform: translateY(-1px);
+        filter: saturate(1.06);
+    }
+    100% {
+        transform: translateY(0);
+        filter: saturate(1);
+    }
+}
+
+#generate-song-btn,
+#open-output-btn,
+#auto-vram-btn {
+    font-weight: 700 !important;
+    border-width: 1px !important;
+    border-style: solid !important;
+    letter-spacing: 0.01em;
+    transition: transform 0.16s ease, box-shadow 0.16s ease, filter 0.16s ease !important;
+    background-size: 200% 200% !important;
+    animation: glowPulse 2.8s ease-in-out infinite !important;
+}
+
+#generate-song-btn {
+    background: linear-gradient(135deg, #39e27d 0%, #149647 55%, #0d6e34 100%) !important;
+    color: #f4fff8 !important;
+    border-color: #97f5b6 !important;
+    box-shadow: 0 0 0 1px rgba(57, 226, 125, 0.18), 0 0 24px rgba(57, 226, 125, 0.38) !important;
+}
+
+#generate-song-btn:hover {
+    transform: translateY(-1px);
+    filter: saturate(1.08);
+    box-shadow: 0 0 0 1px rgba(57, 226, 125, 0.24), 0 0 30px rgba(57, 226, 125, 0.5) !important;
+}
+
+#open-output-btn {
+    background: linear-gradient(135deg, #ffe07a 0%, #f7bc27 58%, #db9300 100%) !important;
+    color: #3f2800 !important;
+    border-color: #ffe7a0 !important;
+    box-shadow: 0 0 0 1px rgba(247, 188, 39, 0.18), 0 0 22px rgba(247, 188, 39, 0.34) !important;
+}
+
+#open-output-btn:hover {
+    transform: translateY(-1px);
+    filter: saturate(1.08);
+    box-shadow: 0 0 0 1px rgba(247, 188, 39, 0.24), 0 0 28px rgba(247, 188, 39, 0.44) !important;
+}
+
+#auto-vram-btn {
+    background: linear-gradient(135deg, #ff8f73 0%, #d94238 48%, #8f0f1d 100%) !important;
+    color: #fff4f1 !important;
+    border-color: #ffc1b4 !important;
+    box-shadow: 0 0 0 1px rgba(217, 66, 56, 0.2), 0 0 26px rgba(217, 66, 56, 0.42) !important;
+}
+
+#auto-vram-btn:hover {
+    transform: translateY(-1px);
+    filter: saturate(1.06);
+    box-shadow: 0 0 0 1px rgba(217, 66, 56, 0.26), 0 0 34px rgba(217, 66, 56, 0.54) !important;
+}
+
+#generate-song-btn:focus-visible,
+#open-output-btn:focus-visible,
+#auto-vram-btn:focus-visible {
+    outline: 2px solid rgba(255, 255, 255, 0.55) !important;
+    outline-offset: 2px !important;
+}
+
+#auto-vram-status {
+    margin-top: 0.35rem;
+    color: #ffd9d1;
+}
+"""
 
 # Parse command line arguments
 parser = argparse.ArgumentParser(description='LeVo Song Generation App')
@@ -141,6 +271,15 @@ def detect_gpu_memory():
         print("Using normal memory mode based on detected GPU memory.")
     
     return available_memory, use_low_mem
+
+
+def get_total_gpu_memory_gb():
+    """Return total VRAM capacity for the active CUDA device in GB."""
+    if not torch.cuda.is_available():
+        return 0.0
+    device = torch.cuda.current_device()
+    total_memory = torch.cuda.get_device_properties(device).total_memory
+    return total_memory / 1024 / 1024 / 1024
 
 AVAILABLE_MEMORY, AUTO_LOW_MEM = detect_gpu_memory()
 
@@ -1666,8 +1805,8 @@ def submit_lyrics(
     yield song_data.get("audio"), song_data.get("video"), history, process_history(history), gr.update(visible=False), gr.update(visible=False)
 
 # Create Gradio interface
-with gr.Blocks(title="SECourses LeVo Song Generation App",theme=gr.themes.Soft()) as demo:
-    gr.Markdown("# SECourses Premium LeVo Song Generator V10.1 - Up to 4m30s Songs - https://www.patreon.com/posts/135592123")
+with gr.Blocks(title="SECourses LeVo Song Generation App", theme=gr.themes.Soft(), css=BUTTON_CSS) as demo:
+    gr.Markdown("# SECourses Premium LeVo Song Generator V11.0 - Up to 4m30s Songs - https://www.patreon.com/posts/135592123")
     
     history = gr.State([])
     session = gr.State({})
@@ -1734,8 +1873,14 @@ with gr.Blocks(title="SECourses LeVo Song Generation App",theme=gr.themes.Soft()
             
                     # Generate and Open Folder buttons at the top
                     with gr.Row():
-                        submit_btn = gr.Button("Generate Song", variant="primary")
-                        open_folder_btn = gr.Button("Open Output Folder", variant="secondary")
+                        submit_btn = gr.Button("Generate Song", variant="primary", elem_id="generate-song-btn")
+                        open_folder_btn = gr.Button("Open Output Folder", variant="secondary", elem_id="open-output-btn")
+                        auto_vram_optimize_btn = gr.Button(
+                            "Auto VRAM Set Optimize",
+                            variant="secondary",
+                            elem_id="auto-vram-btn"
+                        )
+                    auto_vram_status = gr.Markdown("", visible=False, elem_id="auto-vram-status")
             
                     # Preset controls and duration
                     with gr.Row():
@@ -2829,6 +2974,72 @@ with gr.Blocks(title="SECourses LeVo Song Generation App",theme=gr.themes.Soft()
         fn=disable_other_quant_mode,
         inputs=[enable_lm_mlp_int4],
         outputs=[enable_lm_mlp_int8],
+    )
+
+    def apply_auto_vram_optimize():
+        total_vram = get_total_gpu_memory_gb()
+        if total_vram <= 0:
+            return (
+                gr.update(value=False),
+                gr.update(value=False),
+                gr.update(value=False),
+                gr.update(
+                    value="**Auto VRAM Set Optimize**: No CUDA GPU detected. Left VRAM settings at defaults.",
+                    visible=True,
+                ),
+            )
+
+        if total_vram >= 28.0:
+            message = (
+                f"**Auto VRAM Set Optimize**: Detected `{total_vram:.1f} GB` GPU. "
+                "Enabled `Disable Model Offloading` for the high-VRAM profile."
+            )
+            return (
+                gr.update(value=True),
+                gr.update(value=False),
+                gr.update(value=False),
+                gr.update(value=message, visible=True),
+            )
+
+        if total_vram >= 22.0:
+            message = (
+                f"**Auto VRAM Set Optimize**: Detected `{total_vram:.1f} GB` GPU. "
+                "Kept the default VRAM settings."
+            )
+            return (
+                gr.update(value=False),
+                gr.update(value=False),
+                gr.update(value=False),
+                gr.update(value=message, visible=True),
+            )
+
+        if total_vram <= 17.0:
+            message = (
+                f"**Auto VRAM Set Optimize**: Detected `{total_vram:.1f} GB` GPU. "
+                "Enabled `Enable LLM MLP-Only Int8` for the low-VRAM profile."
+            )
+            return (
+                gr.update(value=False),
+                gr.update(value=True),
+                gr.update(value=False),
+                gr.update(value=message, visible=True),
+            )
+
+        message = (
+            f"**Auto VRAM Set Optimize**: Detected `{total_vram:.1f} GB` GPU. "
+            "Kept the default VRAM settings."
+        )
+        return (
+            gr.update(value=False),
+            gr.update(value=False),
+            gr.update(value=False),
+            gr.update(value=message, visible=True),
+        )
+
+    auto_vram_optimize_btn.click(
+        fn=apply_auto_vram_optimize,
+        inputs=[],
+        outputs=[disable_offload, enable_lm_mlp_int8, enable_lm_mlp_int4, auto_vram_status],
     )
     
     # Modified to return both dropdown and clear the input field
