@@ -2250,7 +2250,7 @@ with gr.Blocks(title="SECourses LeVo Song Generation App",theme=gr.themes.Soft()
                     - **[inst-short]** - ~5 seconds instrumental break
                     - **[inst-medium]** - ~10-15 seconds instrumental break
                     - **[inst-long]** - ~20-25 seconds instrumental break
-                    - **[instrumental]** - Alias for instrumental section (works like `[inst-medium]`)
+                    - **[instrumental]** - Accepted alias, automatically normalized to `[inst-medium]`
                     
                     **Outro (Ending):**
                     - **[outro-short]** - ~5 seconds ending
@@ -2274,8 +2274,7 @@ with gr.Blocks(title="SECourses LeVo Song Generation App",theme=gr.themes.Soft()
                     Walking down the street today
                     Sunshine lighting up my way
                     
-                    [pre-chorus]
-                    And I can feel it building up inside
+                    [inst-medium]
                     
                     [chorus]
                     This is our moment, we're alive
@@ -2301,8 +2300,9 @@ with gr.Blocks(title="SECourses LeVo Song Generation App",theme=gr.themes.Soft()
                     ```
                     
                     ### Pro Tips:
-                    - **Place empty lines between sections** for clarity
+                    - **Blank lines inside a section are okay**: only a new structure tag starts the next section
                     - **Tags are case-insensitive**: `[VERSE]` = `[verse]`
+                    - **Aliases are normalized automatically**: `[intro]` -> `[intro-short]`, `[inst]` -> `[inst-short]`, `[instrumental]` -> `[inst-medium]`, `[outro]` -> `[outro-short]`
                     - **Vocal sections MUST have lyrics**: `[verse]`, `[chorus]`, `[bridge]`
                     - **Instrumental sections MUST NOT have lyrics**: All `[intro-*]`, `[inst-*]`, `[outro-*]`, `[silence]`
                     - Use consistent structure for professional results
@@ -2310,7 +2310,7 @@ with gr.Blocks(title="SECourses LeVo Song Generation App",theme=gr.themes.Soft()
                     
                     ### Important Rules:
                     - [OK] Valid: `[intro-medium]`, `[intro-short]`, `[intro-long]`
-                    - [ERROR] Invalid: `[intro]` alone (must specify length)
+                    - [OK] Accepted aliases: `[intro]`, `[inst]`, `[instrumental]`, `[outro]`
                     - [OK] Valid: `[verse]` with lyrics, `[chorus]` with lyrics, `[bridge]` with lyrics
                     - [ERROR] Invalid: Tags not in the list above (e.g., `[pre-chorus]`, `[rap]`, `[drop]`)
                     

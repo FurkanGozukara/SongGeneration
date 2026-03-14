@@ -58,32 +58,55 @@ def generate_song(lyric, description=None, prompt_audio=None, genre=None, cfg_co
     sample_rate = MODEL.cfg.sample_rate
     
     # format lyric
-    lyric = lyric.replace("[intro]", "[intro-short]").replace("[inst]", "[inst-short]").replace("[outro]", "[outro-short]")
-    paragraphs = [p.strip() for p in lyric.strip().split('\n\n') if p.strip()]
-    if len(paragraphs) < 1:
+    lyric = lyric.replace("[intro]", "[intro-short]").replace("[inst]", "[inst-short]").replace("[instrumental]", "[inst-medium]").replace("[outro]", "[outro-short]")
+    lines = lyric.strip().splitlines()
+    if not any(line.strip() for line in lines):
         return None, json.dumps("Lyrics can not be left blank")
     paragraphs_norm = []
     vocal_flag = False
-    for para in paragraphs:
-        lines = para.splitlines()
-        struct_tag = lines[0].strip().lower()
-        if struct_tag not in STRUCTS:
-            return None, json.dumps(f"Segments should start with a structure tag in {STRUCTS}")
-        if struct_tag in vocal_structs:
+    current_tag = None
+    current_lines = []
+
+    def flush_section():
+        nonlocal current_tag, current_lines, vocal_flag
+        if current_tag is None:
+            return None
+        if current_tag in vocal_structs:
             vocal_flag = True
-            if len(lines) < 2 or not [line.strip() for line in lines[1:] if line.strip()]:
-                return None, json.dumps("The following segments require lyrics: [verse], [chorus], [bridge]")
-            else:
-                new_para_list = []
-                for line in lines[1:]:
-                    new_para_list.append(re.sub(r"[^\w\s\[\]\-\u4e00-\u9fff\u3040-\u309f\u30a0-\u30ff\uac00-\ud7af\u00c0-\u017f]", "", line))
-                new_para_str = f"{struct_tag} {'.'.join(new_para_list)}"
+            cleaned_lines = []
+            for content_line in current_lines:
+                cleaned = re.sub(r"[^\w\s\[\]\-\u4e00-\u9fff\u3040-\u309f\u30a0-\u30ff\uac00-\ud7af\u00c0-\u017f]", "", content_line).strip()
+                if cleaned:
+                    cleaned_lines.append(cleaned)
+            if not cleaned_lines:
+                return json.dumps("The following segments require lyrics: [verse], [chorus], [bridge]")
+            paragraphs_norm.append(f"{current_tag} {'.'.join(cleaned_lines)}")
         else:
-            if len(lines) > 1:
-                return None, json.dumps("The following segments should not contain lyrics: [intro], [intro-short], [intro-medium], [inst], [inst-short], [inst-medium], [outro], [outro-short], [outro-medium]")
-            else:
-                new_para_str = struct_tag
-        paragraphs_norm.append(new_para_str)
+            if any(line.strip() for line in current_lines):
+                return json.dumps("The following segments should not contain lyrics: [intro], [intro-short], [intro-medium], [intro-long], [inst], [instrumental], [inst-short], [inst-medium], [inst-long], [outro], [outro-short], [outro-medium], [outro-long], [silence]")
+            paragraphs_norm.append(current_tag)
+        current_tag = None
+        current_lines = []
+        return None
+
+    for raw_line in lines:
+        line = raw_line.strip()
+        if not line:
+            continue
+        struct_tag = line.lower()
+        if struct_tag in STRUCTS:
+            error = flush_section()
+            if error is not None:
+                return None, error
+            current_tag = struct_tag
+            continue
+        if current_tag is None:
+            return None, json.dumps(f"Segments should start with a structure tag in {STRUCTS}")
+        current_lines.append(line)
+
+    error = flush_section()
+    if error is not None:
+        return None, error
     if not vocal_flag:
         return None, json.dumps(f"The lyric must contain at least one of the following structures: {vocal_structs}")
     lyric_norm = " ; ".join(paragraphs_norm)
@@ -128,7 +151,7 @@ with gr.Blocks(title="SongGeneration Demo Space") as demo:
                 lines=5,
                 max_lines=15,
                 value=EXAMPLE_LYRICS,
-                info="Each paragraph represents a segment starting with a structure tag and ending with a blank line, each line is a sentence without punctuation, segments [intro], [inst], [outro] should not contain lyrics, while [verse], [chorus], and [bridge] require lyrics.",
+                info="Each paragraph represents a segment starting with a structure tag and ending with a blank line. Aliases [intro], [inst], [instrumental], and [outro] are normalized automatically. Instrumental sections should not contain lyrics, while [verse], [chorus], and [bridge] require lyrics.",
                 placeholder="""Lyric Format
 '''
 [structure tag]
@@ -139,8 +162,9 @@ lyrics
 '''
 1. One paragraph represents one segments, starting with a structure tag and ending with a blank line
 2. One line represents one sentence, punctuation is not recommended inside the sentence
-3. The following segments should not contain lyrics: [intro-short], [intro-medium], [inst-short], [inst-medium], [outro-short], [outro-medium]
+3. The following segments should not contain lyrics: [intro-short], [intro-medium], [intro-long], [inst-short], [inst-medium], [inst-long], [outro-short], [outro-medium], [outro-long], [silence]
 4. The following segments require lyrics: [verse], [chorus], [bridge]
+5. Accepted aliases are normalized automatically: [intro] -> [intro-short], [inst] -> [inst-short], [instrumental] -> [inst-medium], [outro] -> [outro-short]
 """
             )
 

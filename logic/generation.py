@@ -25,6 +25,7 @@ _INSTRUMENTAL_ALIASES = {'[instrumental]'}
 _STRUCTURE_REPLACEMENTS = {
     '[intro]': '[intro-short]',
     '[inst]': '[inst-short]',
+    '[instrumental]': '[inst-medium]',
     '[outro]': '[outro-short]'
 }
 _SANITIZE_PATTERN = re.compile(r"[^\w\s\[\]\-\u4e00-\u9fff\u3040-\u309f\u30a0-\u30ff\uac00-\ud7af\u00c0-\u017f]")
@@ -55,44 +56,61 @@ def normalize_lyrics(lyrics: str, require_vocal: bool = True) -> str:
     for src, dst in _STRUCTURE_REPLACEMENTS.items():
         normalized_text = re.sub(re.escape(src), dst, normalized_text, flags=re.IGNORECASE)
 
-    paragraphs = [p.strip() for p in normalized_text.strip().split('\n\n') if p.strip()]
-    if not paragraphs:
-        raise ValueError("No valid paragraphs found")
-
     valid_tags_lower = {tag.lower() for tag in _load_valid_structures()}
     valid_tags_lower.update(_INSTRUMENTAL_ALIASES)
     vocal_tags_lower = {tag.lower() for tag in _VOCAL_STRUCTURES}
 
     normalized_parts: List[str] = []
     has_vocal = False
+    current_tag: Optional[str] = None
+    current_lines: List[str] = []
 
-    for para in paragraphs:
-        lines = [line.strip() for line in para.splitlines() if line.strip()]
-        if not lines:
-            continue
+    def flush_section() -> None:
+        nonlocal current_tag, current_lines, has_vocal
+        if current_tag is None:
+            return
 
-        struct_tag = lines[0].lower()
-        if struct_tag not in valid_tags_lower:
-            all_tags = _load_valid_structures() + list(_INSTRUMENTAL_ALIASES)
-            raise ValueError(f"Invalid structure tag: {struct_tag}. Valid tags: {', '.join(all_tags)}")
-
-        if struct_tag in vocal_tags_lower:
+        if current_tag in vocal_tags_lower:
             has_vocal = True
             cleaned_lines = []
-            for line in lines[1:]:
+            for line in current_lines:
                 cleaned = _SANITIZE_PATTERN.sub("", line).strip()
                 if cleaned:
                     cleaned_lines.append(cleaned)
             if not cleaned_lines:
-                raise ValueError(f"Structure {struct_tag} requires lyrics but none found")
-            normalized_parts.append(f"{struct_tag} {'.'.join(cleaned_lines)}")
+                raise ValueError(f"Structure {current_tag} requires lyrics but none found")
+            normalized_parts.append(f"{current_tag} {'.'.join(cleaned_lines)}")
         else:
-            if any(line.strip() for line in lines[1:]):
-                raise ValueError(f"Structure {struct_tag} should not contain lyrics")
-            normalized_parts.append(struct_tag)
+            if any(line.strip() for line in current_lines):
+                raise ValueError(f"Structure {current_tag} should not contain lyrics")
+            normalized_parts.append(current_tag)
+
+        current_tag = None
+        current_lines = []
+
+    for raw_line in normalized_text.strip().splitlines():
+        line = raw_line.strip()
+        if not line:
+            continue
+
+        lowered = line.lower()
+        if lowered in valid_tags_lower:
+            flush_section()
+            current_tag = lowered
+            continue
+
+        if current_tag is None:
+            all_tags = _load_valid_structures() + list(_INSTRUMENTAL_ALIASES)
+            raise ValueError(
+                f"Expected a structure tag before lyric line: {line}. Valid tags: {', '.join(all_tags)}"
+            )
+
+        current_lines.append(line)
+
+    flush_section()
 
     if not normalized_parts:
-        raise ValueError("No valid paragraphs found")
+        raise ValueError("No valid structure tags found")
 
     if require_vocal and not has_vocal:
         raise ValueError(f"Lyrics must contain at least one vocal structure: {', '.join(sorted(_VOCAL_STRUCTURES))}")
