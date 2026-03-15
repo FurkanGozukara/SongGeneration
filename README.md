@@ -6,6 +6,4 @@
 
 ### App download and install link : https://www.patreon.com/posts/135592123
 
-## App Screenshots
-
-
+ 
